@@ -1,0 +1,86 @@
+{
+  "project_name": "AI Episode Studio",
+  "theme": "Dark",
+  "archetype": "Archetype 4 (Swiss & High-Contrast) adapted for Cinematic Dashboard",
+  "emotion_tone": "Professional, Focus-driven, Cinematic, Control Room",
+  "colors": {
+    "background": "#050505",
+    "surface": "#121212",
+    "surface_hover": "#1A1A1A",
+    "primary": "#FF3B30",
+    "primary_hover": "#FF453A",
+    "secondary": "#FFFFFF",
+    "text_primary": "#F5F5F5",
+    "text_secondary": "#A1A1AA",
+    "border": "rgba(255, 255, 255, 0.1)",
+    "success": "#34C759",
+    "warning": "#FFCC00"
+  },
+  "typography": {
+    "heading_font": "Outfit, sans-serif",
+    "body_font": "IBM Plex Sans, sans-serif",
+    "h1": "text-4xl sm:text-5xl font-black tracking-tight text-white",
+    "h2": "text-2xl sm:text-3xl font-bold tracking-tight text-white",
+    "h3": "text-xl sm:text-2xl font-bold text-white",
+    "body": "text-base leading-relaxed text-[#F5F5F5]",
+    "label": "text-xs font-semibold uppercase tracking-[0.2em] text-[#A1A1AA]"
+  },
+  "layout_and_spacing": {
+    "container": "w-full max-w-[1400px] mx-auto px-6",
+    "grid": "grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 or gap-6",
+    "bento_strategy": "Control Room Grid for dashboard: Dense data presentation, tight gaps, full viewport height utilization.",
+    "card_padding": "p-6",
+    "radius": "rounded-md (max 8px border-radius, prefer sharp edges for Swiss aesthetic)"
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-[#FF3B30] text-white font-bold rounded-md px-4 py-2 hover:bg-[#FF453A] hover:text-white transition-colors",
+      "secondary": "bg-transparent border border-white/20 text-white rounded-md px-4 py-2 hover:bg-white/10 transition-colors"
+    },
+    "cards": "border border-white/10 bg-[#121212] rounded-md shadow-sm overflow-hidden",
+    "inputs": "bg-[#0A0A0A] border border-white/10 text-white rounded-md px-4 py-2 focus:ring-1 focus:ring-[#FF3B30] focus:border-[#FF3B30] focus:outline-none w-full",
+    "navigation": "Solid background bg-[#050505] with bottom border border-white/10. Top nav with logo left, user navigation links right. z-50 sticky top-0.",
+    "video_player_container": "aspect-video bg-black rounded-md border border-white/10 flex items-center justify-center relative overflow-hidden"
+  },
+  "animations": {
+    "hover": "transition-colors duration-200 ease-in-out",
+    "modal_enter": "animate-in fade-in zoom-in-95 duration-200"
+  },
+  "media": {
+    "character_portrait_placeholder": {
+      "url": "https://static.prod-images.emergentagent.com/jobs/79e2f754-43ce-44a2-9d11-60523bb0d255/images/e7f594932d8af1231fb8f1fb8853952c8c60fea7ce40ad3450bb2fe15a086998.png",
+      "description": "Cinematic portrait of a male sci-fi protagonist for character library.",
+      "usage": "Use as fallback image in Character Library when user hasn't uploaded one."
+    },
+    "scene_forest_placeholder": {
+      "url": "https://static.prod-images.emergentagent.com/jobs/79e2f754-43ce-44a2-9d11-60523bb0d255/images/623d1bffe45150b2f2ede70157aed5fe723bbd8f51fa49c37a6ca79970a2b82c.png",
+      "description": "Beautiful fantasy forest scene at golden hour.",
+      "usage": "Use as mocked generated scene image (Option 1)."
+    },
+    "scene_lab_placeholder": {
+      "url": "https://static.prod-images.emergentagent.com/jobs/79e2f754-43ce-44a2-9d11-60523bb0d255/images/8b466f1bd6dcd2d931e8035ea08abd83e6da41e8dfb8cb69e0fdc1ff86dad122.png",
+      "description": "Modern sleek futuristic laboratory.",
+      "usage": "Use as mocked generated scene image (Option 2)."
+    },
+    "video_timeline_placeholder": {
+      "url": "https://static.prod-images.emergentagent.com/jobs/79e2f754-43ce-44a2-9d11-60523bb0d255/images/dc7e011ece2773e9bd996694e5c8b400b0d753c72f2c0a6c3308ba6b1701252e.png",
+      "description": "Video editing timeline interface abstract background.",
+      "usage": "Use for the final stitched video placeholder in the Final Export Page."
+    },
+    "user_avatar": {
+      "url": "https://images.unsplash.com/photo-1740252117027-4275d3f84385?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NDh8MHwxfHNlYXJjaHwyfHx1c2VyJTIwYXZhdGFyJTIwcHJvZmlsZSUyMHBvcnRyYWl0fGVufDB8fHx8MTc3ODgwMzEzNXww&ixlib=rb-4.1.0&q=85",
+      "description": "A man with a tie and sunglasses on his head.",
+      "usage": "Use for user profile/avatar in the admin dashboard and top navigation."
+    }
+  },
+  "specific_instructions_to_main_agent": [
+    "Use Phosphor Icons (@phosphor-icons/react) or lucide-react for iconography. Minimalist, technical aesthetic.",
+    "Apply 'data-testid' attributes to ALL interactive elements (buttons, links, form inputs) and key state indicators for testing.",
+    "The 'Admin Page' data tables must be dense and cardless, using subtle 1px row borders for separation.",
+    "For the 'Scene breakdown editor', use a dense bento 'Control Room' grid so users can edit script/duration/visual prompts efficiently side-by-side.",
+    "Implement the 'Expand Next 5 Seconds' action as a subtle secondary CTA alongside the generated video segments.",
+    "Do NOT use HTML <input type='date'> or <select>. Rely heavily on Shadcn UI customized with the dark color palette.",
+    "Ensure hover states explicitly declare text colors (e.g., hover:text-white) rather than inheriting, to prevent contrast bugs.",
+    "Ensure Final Export page uses the video_timeline_placeholder in an aspect-video container to visualize stitched clips."
+  ]
+}
