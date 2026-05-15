@@ -225,6 +225,14 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 5 · voice 1
 
 ## Backlog (P1) — refreshed
 - Character drag handles in Cast view (deferred from iteration 12; requires `order` field on Character model + `PUT /api/projects/{id}/characters/reorder`).
+- **Safe delete / Undo delete** — replace hard cascade-delete with a recoverable flow:
+  1. Soft-delete first: add `deleted_at`, `deleted_by`, `delete_expires_at` to projects (and propagate hiding for child resources).
+  2. Hide soft-deleted projects from the dashboard list endpoint.
+  3. Frontend shows a 5-second toast with an **Undo** action.
+  4. Undo calls `POST /api/projects/{id}/restore` to revive the project + its scenes/characters/segments.
+  5. If no Undo arrives, a background cleanup job (or `DELETE /api/projects/{id}/purge`) performs the permanent cascade after `delete_expires_at`.
+  - Future endpoints: `DELETE /api/projects/{id}` → soft delete · `POST /api/projects/{id}/restore` → restore · `DELETE /api/projects/{id}/purge` → permanent delete.
+  - Out of scope today: frontend-only restore would be misleading because the data is truly gone — explicitly NOT shipped in iteration 15.
 - Real provider plug-ins behind feature flags: LLM, image, video, voice, music, export.
 - API key inputs + storage (locked until real-provider mode is activated).
 
