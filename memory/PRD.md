@@ -486,6 +486,53 @@ Pure-logic, zero-network. Deterministic scoring + enhancement helpers:
 Stopped before Phase 2B real-LLM wiring per user. The next milestone is the **Emergent universal LLM key → real LLM provider** wiring (LLM modality only).
 
 
+## Iteration 22 (2026-02) — Safe delete + Undo + 24h purge
+**Goal**: replace the hard cascade-delete with a recoverable soft-delete flow so accidental clicks are undoable.
+
+### Backend
+- **`DELETE /api/projects/{id}` is now a soft-delete.** Sets `deleted_at`, `deleted_by="user-demo"`, `delete_expires_at = now + 24h`, `previous_status`, and flips `status="deleted"`. Child scenes/characters/segments are intentionally untouched so restore is a true round-trip. Response:
+  ```json
+  { "ok": true, "soft_deleted": true, "project_id": "...",
+    "deleted_at": "...", "delete_expires_at": "...", "previous_status": "draft" }
+  ```
+  Idempotent: a second DELETE returns `already_deleted: true`. Unknown id returns `{ok:true, soft_deleted:false, exists:false}` (no 404 churn for the frontend).
+- **`POST /api/projects/{id}/restore`** — clears `deleted_at/deleted_by/delete_expires_at/previous_status` via `$unset`, restores `status` from `previous_status` (default `"draft"`). Returns the restored project. 404 only when the id is truly unknown; restoring an already-active project is a safe no-op that returns the project as-is.
+- **`POST /api/admin/purge-deleted-projects`** — permanently removes only projects whose `delete_expires_at <= now`. Cascades to scenes/characters/segments AND drops `provider_activity` rows scoped to those `project_id`s (health-only rows without project scope are not swept). Returns `{ok, purged: {projects, scenes, characters, segments}}`.
+- **List/get hidden by default**: new `_active_project_filter()` helper hides any project with a non-null `deleted_at`. `GET /api/projects` excludes them; `GET /api/projects/{id}` returns 404 unless `?include_deleted=true`. `PUT /api/projects/{id}` also runs through the same filter so soft-deleted projects cannot be silently updated.
+
+### Frontend
+- `lib/api.js` — `Projects.restore(id)` helper added.
+- `Dashboard.jsx` — `onDelete` no longer opens an AlertDialog. Click → optimistic remove from grid → `Projects.remove()` → sonner toast `Deleted "<title>"` with `action: { label: "Undo" }` and `duration: 5000`. Undo calls `Projects.restore(id)` then `Projects.list()` to refresh `cost_summary` and re-inserts the card. On delete failure, the optimistic removal is rolled back and an error toast fires.
+- ProjectCard simplified — the AlertDialog and its imports are gone; the trash button is the single source of the delete action.
+
+### Tests — **116/116 backend** (was 111, +8 new, −3 obsolete hard-cascade cases)
+- `test_delete_project_is_soft_delete` — response shape; list excludes; GET 404; child data preserved in Mongo (6 scenes, 2 chars, 2 segments).
+- `test_restore_project_brings_it_back` — round-trip; status returns to an active value; card visible again.
+- `test_restore_unknown_project_returns_404`.
+- `test_delete_unknown_project_is_safe` — `{ok:true, soft_deleted:false, exists:false}`.
+- `test_delete_does_not_touch_other_projects` — B still has its scenes/segments after A is soft-deleted.
+- `test_purge_removes_expired_projects_and_their_children` — force-expire via Mongo → purge endpoint cascades scenes/chars/segments away.
+- `test_purge_does_not_touch_active_or_non_expired_projects` — newly soft-deleted (24h-fresh) and active projects are left alone.
+- `test_delete_then_restore_is_idempotent` — second DELETE has `already_deleted:true`; second restore on an active project returns the project (no 404).
+
+### Testing agent (iteration_5)
+- Backend 116/116. 11/11 curl-smoke endpoint contracts verified on the live preview URL.
+- Frontend end-to-end: trash hover → click → toast with Undo → Undo restores → expiry path stays hidden after refresh → stats recompute 3/2 → 4/3 → 3/2 → 4/3 → 3/2 across the flow. Zero console errors. 0 bugs found, 0 action items.
+
+### Mock-only invariants — re-verified
+- `providers/` package still contains zero http imports outside `llm_real.py`.
+- All five non-LLM `USE_REAL_*_PROVIDER` flags remain `false` and `key_present_for_modality()` returns `False` for them regardless.
+- No API key input fields. No Stripe. No auth.
+
+### Files changed (3)
+**Modified**: `backend/server.py` (delete/restore/purge endpoints + `_active_project_filter` + listing/get/update filters), `backend/tests/backend_test.py` (8 new tests, replaced the 3 old hard-cascade tests), `frontend/src/pages/Dashboard.jsx` (undo toast flow, AlertDialog removed), `frontend/src/lib/api.js` (Projects.restore added).
+
+### Backlog (P1) — refreshed
+- Character drag handles in Cast view (still deferred).
+- Background scheduler for the 24h purge (currently manual `POST /api/admin/purge-deleted-projects`).
+- Real provider plug-ins for non-LLM modalities behind feature flags + at-rest secrets store.
+
+
 ## Iteration 21 (2026-02) — Phase 2B: Real LLM provider (LLM modality only)
 **Goal**: ship the first real provider for AI Episode Studio. Strictly LLM-only. All other modalities remain permanently mock-pinned.
 
