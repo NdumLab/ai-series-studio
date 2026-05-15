@@ -1006,3 +1006,50 @@ def test_dashboard_estimate_unavailable_when_costs_missing():
     }
     # No request needed; this is a schema-level assertion on the test code itself.
     assert expected_keys
+
+
+# ---------- Reduce to Draft ----------
+def test_reduce_to_draft_basic_and_idempotent(s):
+    p = s.post(f"{API}/projects", json={"title": "TEST_Reduce", "idea": "x"}).json()
+    pid = p["id"]
+    try:
+        sc = s.post(
+            f"{API}/projects/{pid}/scenes",
+            json={"title": "TEST_R", "duration": 10},
+        ).json()
+        # Add 4 segments under the scene (1 generate + 3 expansions)
+        _retry(lambda: s.post(f"{API}/scenes/{sc['id']}/segments"))
+        for _ in range(3):
+            _retry(lambda: s.post(f"{API}/scenes/{sc['id']}/expand"))
+        # Sanity: 4 segments, scene total = 2 + 12*4 + 1 = 51
+        cs = s.get(f"{API}/projects/{pid}/scene-costs").json()
+        row = next(r for r in cs["scenes"] if r["scene_id"] == sc["id"])
+        assert row["segments_count"] == 4
+        assert row["total_credits"] == 51
+
+        before_total = cs["grand_total_credits"]
+        r = s.post(f"{API}/scenes/{sc['id']}/reduce-to-draft")
+        assert r.status_code == 200
+        d = r.json()
+        assert d["mock_mode"] is True
+        assert d["deleted_segments"] == 3
+        assert d["saved_credits"] == 36  # 3 × 12
+        assert len(d["segments"]) == 1   # only earliest kept
+
+        cs2 = s.get(f"{API}/projects/{pid}/scene-costs").json()
+        row2 = next(r for r in cs2["scenes"] if r["scene_id"] == sc["id"])
+        assert row2["segments_count"] == 1
+        assert row2["total_credits"] == 15
+        assert before_total - cs2["grand_total_credits"] == 36
+
+        # Idempotent: running again deletes nothing
+        r = s.post(f"{API}/scenes/{sc['id']}/reduce-to-draft").json()
+        assert r["deleted_segments"] == 0
+        assert r["saved_credits"] == 0
+    finally:
+        s.delete(f"{API}/projects/{pid}")
+
+
+def test_reduce_to_draft_404_unknown_scene(s):
+    r = s.post(f"{API}/scenes/does-not-exist/reduce-to-draft")
+    assert r.status_code == 404

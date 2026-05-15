@@ -33,6 +33,7 @@ export const Scenes = {
   generateImage: (id) => api.post(`/scenes/${id}/generate-image`).then((r) => r.data),
   generateSegment: (id) => api.post(`/scenes/${id}/segments`).then((r) => r.data),
   expand: (id) => api.post(`/scenes/${id}/expand`).then((r) => r.data),
+  reduceToDraft: (id) => api.post(`/scenes/${id}/reduce-to-draft`).then((r) => r.data),
 };
 
 export const Segments = {

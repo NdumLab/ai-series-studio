@@ -89,6 +89,7 @@ export default function Dashboard() {
   const [idea, setIdea] = useState("");
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [sortKey, setSortKey] = useState("newest");
 
   const load = () =>
     Projects.list()
@@ -207,9 +208,32 @@ export default function Dashboard() {
 
       {/* Projects grid */}
       <div>
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <h2 className="font-display text-xl font-bold">Your projects</h2>
-          <span className="es-label">{projects.length} total</span>
+          <div className="flex items-center gap-2 flex-wrap" data-testid="dash-sort-row">
+            <span className="es-label">Sort by</span>
+            {[
+              { key: "newest", label: "Newest" },
+              { key: "title", label: "Title A→Z" },
+              { key: "cost-desc", label: "Cost ↓" },
+              { key: "cost-asc", label: "Cost ↑" },
+            ].map((opt) => (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() => setSortKey(opt.key)}
+                data-testid={`sort-${opt.key}`}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${
+                  sortKey === opt.key
+                    ? "bg-[#FF3B30] border-[#FF3B30] text-white"
+                    : "border-white/10 bg-transparent text-[#A1A1AA] hover:text-white hover:bg-white/5"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+            <span className="es-label">{projects.length} total</span>
+          </div>
         </div>
         {loading ? (
           <div className="text-[#A1A1AA] text-sm">Loading…</div>
@@ -220,7 +244,17 @@ export default function Dashboard() {
             className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
             data-testid="projects-grid"
           >
-            {projects.map((p) => (
+            {[...projects]
+              .sort((a, b) => {
+                const ac = a.cost_summary?.grand_total_credits ?? 0;
+                const bc = b.cost_summary?.grand_total_credits ?? 0;
+                if (sortKey === "title") return (a.title || "").localeCompare(b.title || "");
+                if (sortKey === "cost-desc") return bc - ac;
+                if (sortKey === "cost-asc") return ac - bc;
+                // newest
+                return new Date(b.created_at) - new Date(a.created_at);
+              })
+              .map((p) => (
               <Link
                 key={p.id}
                 to={`/projects/${p.id}`}

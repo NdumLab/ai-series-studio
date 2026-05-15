@@ -178,3 +178,10 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 5 · voice 1
   - `test_trend_decrease_on_scene_delete` (delta exactly −15 = full default scene cost)
   - `test_dashboard_estimate_unavailable_when_costs_missing` (schema contract for the field)
 - Mock-only invariants preserved.
+
+## Iteration 11 (2026-02) — Reduce-to-Draft + sortable Dashboard
+- Backend: new endpoint `POST /api/scenes/{id}/reduce-to-draft` deletes every video segment under the scene except the earliest one (idempotent — 0 or 1 segment is a no-op). Returns `{deleted_segments, saved_credits, segments[], mock_mode:true}`. Saved credits = `deleted_segments × COSTS["video_segment"]`.
+- Frontend: the orange "High-cost scene · X%" badge now contains an inline **"Reduce to Draft"** button (only visible when the scene has more than one segment). Clicking it calls the new endpoint, toasts `"Saved -N credits"`, and triggers `reloadAll()` which makes the existing trend chip flash `↓ -N` on the Cost badge.
+- Dashboard: new **Sort by** chip-row above the projects grid — `Newest` (default), `Title A→Z`, `Cost ↓`, `Cost ↑`. Sort is client-side using the existing `cost_summary.grand_total_credits`; no backend change required.
+- Tests: 53/53 backend cases pass. Added: `test_reduce_to_draft_basic_and_idempotent` (4 segments → 1 segment, saves 36 credits, second call deletes 0) and `test_reduce_to_draft_404_unknown_scene`.
+- Mock-only invariants preserved.

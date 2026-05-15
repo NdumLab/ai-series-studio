@@ -729,6 +729,25 @@ function SceneEditor({ index, scene, characters, options, voiceResolution, costR
             >
               <AlertCircle className="w-3 h-3" />
               High-cost scene · {Math.round(costRow.share_pct)}%
+              {segmentsCount > 1 && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const r = await Scenes.reduceToDraft(scene.id);
+                    if (r.deleted_segments > 0) {
+                      toast.success(`Saved ~${r.saved_credits} credits`);
+                    } else {
+                      toast(`Already at draft size`, { icon: "✓" });
+                    }
+                    reload();
+                  }}
+                  data-testid={`reduce-to-draft-${scene.id}`}
+                  className="ml-1.5 px-1.5 py-0.5 rounded border border-[#FF9500]/50 hover:bg-[#FF9500]/20 transition-colors"
+                  title="Drops this scene back to 1 planned segment"
+                >
+                  Reduce to Draft
+                </button>
+              )}
             </span>
           )}
         </div>

@@ -1043,6 +1043,43 @@ async def regenerate_segment(segment_id: str):
     return await db.segments.find_one({"id": segment_id}, {"_id": 0})
 
 
+@api.post("/scenes/{scene_id}/reduce-to-draft")
+async def reduce_scene_to_draft(scene_id: str):
+    """Drop the scene's planned segments to 1 by deleting all video segments
+    except the earliest one. Idempotent: a scene with 0 or 1 segment is a no-op.
+    Returns the saved credits and the new segment list."""
+    scene = await db.scenes.find_one({"id": scene_id}, {"_id": 0})
+    if not scene:
+        raise HTTPException(404, "Scene not found")
+
+    segs = await db.segments.find(
+        {"scene_id": scene_id}, {"_id": 0}
+    ).sort("order", 1).to_list(200)
+    seg_cost = COSTS.get("video_segment", 0) or 0
+    deleted_count = 0
+    if len(segs) > 1:
+        keep = segs[0]
+        to_delete = [s["id"] for s in segs[1:]]
+        await db.segments.delete_many({"id": {"$in": to_delete}})
+        deleted_count = len(to_delete)
+        # parent_segment_id of any orphan was the deleted ones — but we deleted them all.
+        # The kept segment is unaffected.
+        scene_status = "video_ready" if keep else "draft"
+        await db.scenes.update_one({"id": scene_id}, {"$set": {"status": scene_status}})
+
+    saved_credits = deleted_count * seg_cost
+    remaining = await db.segments.find(
+        {"scene_id": scene_id}, {"_id": 0}
+    ).sort("order", 1).to_list(200)
+    return {
+        "scene_id": scene_id,
+        "deleted_segments": deleted_count,
+        "saved_credits": saved_credits,
+        "segments": remaining,
+        "mock_mode": True,
+    }
+
+
 @api.delete("/segments/{segment_id}")
 async def delete_segment(segment_id: str):
     await db.segments.delete_one({"id": segment_id})
