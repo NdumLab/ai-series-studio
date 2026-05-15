@@ -248,3 +248,14 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 5 · voice 1
   - `test_delete_project_does_not_touch_other_projects` (deleting project A leaves project B's scenes / characters / segments intact)
   - `test_delete_unknown_project_is_safe` (unknown project → `{ok: true, deleted: all zeros}`)
 - Mock-only invariants preserved; no real provider wiring, no API key fields, no Stripe.
+
+
+## Iteration 15 (2026-02) — Dashboard delete with toast + confirm
+- Each project card on the Dashboard now exposes a small **trash button** in the top-right that appears on hover (`opacity-0 group-hover:opacity-100`). Click stops the card-link navigation and opens an `AlertDialog` confirmation ("Delete "X"? — This permanently removes the project, its scenes, characters, and video segments").
+- On confirm, `Projects.remove(id)` is called; the card is **optimistically removed** from local state (and restored on failure), the top-bar "Projects" / "In progress" stats auto-recompute from `projects.length`.
+- Toast format (uses counts returned by the cascade endpoint, characters only included if > 0):
+  - Full delete → `Deleted "Test Ep" · 6 scenes · 3 characters · 12 segments removed`
+  - Without characters → `Deleted "Test Ep" · 6 scenes · 12 segments removed`
+  - All zeros (already gone) → `Project already removed or not found.`
+- "Saved credits" intentionally **not surfaced** — the backend does not yet compute that and we did not invent the number.
+- Frontend-only; no backend / API key / Stripe changes. Lint clean and prod build OK (179 kB gzip).

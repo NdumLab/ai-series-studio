@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Plus, Film, Clock, ChevronRight, Sparkles, AlertCircle } from "lucide-react";
+import { Plus, Film, Clock, ChevronRight, Sparkles, AlertCircle, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -11,6 +11,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "../components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../components/ui/alert-dialog";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
 import { Button } from "../components/ui/button";
@@ -117,6 +127,37 @@ export default function Dashboard() {
       toast.error("Failed to create");
     } finally {
       setCreating(false);
+    }
+  };
+
+  const onDelete = async (project) => {
+    // Optimistically remove from list; restore on failure.
+    const prev = projects;
+    setProjects((list) => list.filter((p) => p.id !== project.id));
+    try {
+      const res = await Projects.remove(project.id);
+      const d = res?.deleted || {};
+      const projectsCount = d.projects ?? 0;
+      const scenes = d.scenes ?? 0;
+      const chars = d.characters ?? 0;
+      const segments = d.segments ?? 0;
+      if (projectsCount === 0 && scenes === 0 && chars === 0 && segments === 0) {
+        toast("Project already removed or not found.", {
+          id: `del-${project.id}`,
+        });
+        return;
+      }
+      // Include characters only when the message stays clean (i.e. > 0).
+      const parts = [`${scenes} scene${scenes === 1 ? "" : "s"}`];
+      if (chars > 0) parts.push(`${chars} character${chars === 1 ? "" : "s"}`);
+      parts.push(`${segments} segment${segments === 1 ? "" : "s"} removed`);
+      toast.success(`Deleted "${project.title}" · ${parts.join(" · ")}`, {
+        id: `del-${project.id}`,
+        "data-testid": "project-delete-toast",
+      });
+    } catch {
+      setProjects(prev);
+      toast.error("Delete failed");
     }
   };
 
@@ -255,33 +296,7 @@ export default function Dashboard() {
                 return new Date(b.created_at) - new Date(a.created_at);
               })
               .map((p) => (
-              <Link
-                key={p.id}
-                to={`/projects/${p.id}`}
-                data-testid={`project-card-${p.id}`}
-                className="es-card es-card-hover p-5 group block"
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="inline-flex items-center gap-2 text-[10px] font-mono uppercase tracking-widest text-[#A1A1AA]">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#FF3B30]" />
-                    {STATUS_LABEL[p.status] || "Draft"}
-                  </div>
-                  <ChevronRight className="w-4 h-4 text-[#A1A1AA] group-hover:text-white transition-colors" />
-                </div>
-                <h3 className="font-display text-xl font-bold mb-2 text-white">
-                  {p.title}
-                </h3>
-                <p className="text-sm text-[#A1A1AA] line-clamp-3 min-h-[60px]">
-                  {p.idea || "No idea yet — open the project to add one."}
-                </p>
-                <div className="mt-3">
-                  <MiniWalletRing summary={p.cost_summary} />
-                </div>
-                <div className="mt-4 pt-4 border-t border-white/10 flex items-center justify-between text-xs text-[#A1A1AA]">
-                  <span className="font-mono">{p.id.slice(0, 8)}</span>
-                  <span>{new Date(p.created_at).toLocaleDateString()}</span>
-                </div>
-              </Link>
+              <ProjectCard key={p.id} project={p} onDelete={onDelete} />
             ))}
           </div>
         )}
@@ -289,6 +304,96 @@ export default function Dashboard() {
     </div>
   );
 }
+
+function ProjectCard({ project, onDelete }) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="relative group">
+      <Link
+        to={`/projects/${project.id}`}
+        data-testid={`project-card-${project.id}`}
+        className="es-card es-card-hover p-5 block"
+      >
+        <div className="flex items-start justify-between mb-3">
+          <div className="inline-flex items-center gap-2 text-[10px] font-mono uppercase tracking-widest text-[#A1A1AA]">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#FF3B30]" />
+            {STATUS_LABEL[project.status] || "Draft"}
+          </div>
+          <ChevronRight className="w-4 h-4 text-[#A1A1AA] group-hover:text-white transition-colors" />
+        </div>
+        <h3 className="font-display text-xl font-bold mb-2 text-white pr-8">
+          {project.title}
+        </h3>
+        <p className="text-sm text-[#A1A1AA] line-clamp-3 min-h-[60px]">
+          {project.idea || "No idea yet — open the project to add one."}
+        </p>
+        <div className="mt-3">
+          <MiniWalletRing summary={project.cost_summary} />
+        </div>
+        <div className="mt-4 pt-4 border-t border-white/10 flex items-center justify-between text-xs text-[#A1A1AA]">
+          <span className="font-mono">{project.id.slice(0, 8)}</span>
+          <span>{new Date(project.created_at).toLocaleDateString()}</span>
+        </div>
+      </Link>
+
+      <button
+        type="button"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setConfirmOpen(true);
+        }}
+        data-testid={`delete-project-btn-${project.id}`}
+        title="Delete project"
+        className="absolute top-3 right-12 p-1.5 rounded-md text-[#A1A1AA] opacity-0 group-hover:opacity-100 hover:text-[#FF3B30] hover:bg-white/5 transition-opacity"
+      >
+        <Trash2 className="w-3.5 h-3.5" />
+      </button>
+
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent
+          className="bg-[#121212] border-white/10 text-white"
+          data-testid={`delete-project-dialog-${project.id}`}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-display">
+              Delete &quot;{project.title}&quot;?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-[#A1A1AA]">
+              This permanently removes the project, its scenes, characters, and video
+              segments. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              data-testid={`delete-project-cancel-${project.id}`}
+              className="border-white/15 bg-transparent text-white hover:bg-white/10 hover:text-white"
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={busy}
+              onClick={async (e) => {
+                e.preventDefault();
+                setBusy(true);
+                await onDelete(project);
+                setBusy(false);
+                setConfirmOpen(false);
+              }}
+              data-testid={`delete-project-confirm-${project.id}`}
+              className="bg-[#FF3B30] hover:bg-[#FF453A] text-white"
+            >
+              {busy ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+
 
 function Stat({ label, value, icon }) {
   return (
