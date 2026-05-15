@@ -95,3 +95,18 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 5 · voice 1
     - When override ON: editable provider+model selects per modality with a "Test" button each, plus a Save button. Empty fields fall back to global at runtime.
 - Tests: 29/29 passing. Added 7 cases — feature flags all false; new project includes all override fields; default get returns global; override round-trip incl. export_mode; unknown provider 400; mocked test endpoint; existing rewrite/split/scenes/segment/export pipeline still works with override enabled.
 - No real APIs added; no API keys collected or stored.
+
+## Iteration 5 (2026-02) — Inline provider visibility
+- New `ProviderHint` UI atom shown above each generation tab:
+  - Story → "This story rewrite would use: {effective_llm_provider}/{effective_llm_model}"
+  - Images → "This image generation would use: {effective_image_provider}/{effective_image_model}"
+  - Video Segments → "This video generation would use: {effective_video_provider}/{effective_video_model}"
+  - Voice/Music → two hints, one for voice, one for music
+  - Export → "This export would use: {effective_export_provider}/{export_mode}"
+- Right-aligned badge per hint: "Using Global Default" (gray) ⇄ "Project Override Active" (red).
+  Badge reads "Project Override Active" only when `provider_override_enabled=true` AND the modality's effective source is `"project"` (i.e. a project value is actually set). Empty fields under override correctly fall back to global ("global-fallback") and the badge stays "Using Global Default".
+- Effective config is fetched once at the project level via `GET /api/projects/{id}/providers` and shared with all tabs; it auto-refreshes when ProvidersTab saves.
+- All generation buttons remain mock-only; the inline text is informational.
+- Backend: no new endpoints — reuses the existing `/projects/{id}/providers` resolver.
+- Tests: 30/30 passing. Added `test_effective_resolution_per_modality` asserting full merge semantics for all six modalities (override OFF → all global; override ON + value → project; override ON + empty → global-fallback) plus `mock_mode=True` and all USE_REAL_*_PROVIDER flags `False` throughout.
+- No real API calls; no API key fields added or stored.

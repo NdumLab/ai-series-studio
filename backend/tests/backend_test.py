@@ -434,3 +434,92 @@ def test_existing_routes_still_work_with_override(s):
         assert exp["ready"] is True
     finally:
         s.delete(f"{API}/projects/{pid}")
+
+
+def test_effective_resolution_per_modality(s):
+    """Per-modality merge:
+    - override OFF → effective.source == 'global'
+    - override ON + project value set → effective.source == 'project'
+    - override ON + project value empty → effective.source == 'global-fallback'
+    Mock mode and feature flags must remain off throughout.
+    """
+    # Pin global provider settings to a known state first
+    s.put(
+        f"{API}/settings/providers",
+        json={
+            "llm":    {"provider": "openai", "model": "gpt-5.2"},
+            "image":  {"provider": "fal", "model": "flux-pro"},
+            "video":  {"provider": "sora-2", "model": "sora-2"},
+            "voice":  {"provider": "elevenlabs", "model": "eleven-v3"},
+            "music":  {"provider": "suno", "model": "v4"},
+            "export": {"provider": "ffmpeg-local", "model": "ffmpeg-6"},
+        },
+    )
+
+    p = s.post(f"{API}/projects", json={"title": "TEST_Eff", "idea": "x"}).json()
+    pid = p["id"]
+    try:
+        # 1. Override OFF → all six modalities resolve from global
+        d = s.get(f"{API}/projects/{pid}/providers").json()
+        assert d["provider_override_enabled"] is False
+        assert d["mock_mode"] is True
+        for m in ("llm", "image", "video", "voice", "music", "export"):
+            assert d["feature_flags"][m] is False
+            assert d["effective"][m]["source"] == "global"
+        assert d["effective"]["llm"]["provider"] == "openai"
+        assert d["effective"]["image"]["provider"] == "fal"
+        assert d["effective"]["video"]["provider"] == "sora-2"
+        assert d["effective"]["voice"]["provider"] == "elevenlabs"
+        assert d["effective"]["music"]["provider"] == "suno"
+        assert d["effective"]["export"]["provider"] == "ffmpeg-local"
+        assert d["effective"]["export"]["model"] == "ffmpeg-6"  # export_mode round-trip
+
+        # 2. Override ON, set image+video+export only
+        d2 = s.put(
+            f"{API}/projects/{pid}/providers",
+            json={
+                "provider_override_enabled": True,
+                "image_provider": "openai-image", "image_model": "gpt-image-1",
+                "video_provider": "luma", "video_model": "ray-2",
+                "export_provider": "aws-mediaconvert", "export_mode": "default",
+            },
+        ).json()
+        assert d2["provider_override_enabled"] is True
+        # set ones beat global defaults
+        assert d2["effective"]["image"] == {
+            "provider": "openai-image", "model": "gpt-image-1", "source": "project"
+        }
+        assert d2["effective"]["video"] == {
+            "provider": "luma", "model": "ray-2", "source": "project"
+        }
+        assert d2["effective"]["export"]["provider"] == "aws-mediaconvert"
+        assert d2["effective"]["export"]["model"] == "default"
+        assert d2["effective"]["export"]["source"] == "project"
+        # untouched modalities fall back to global
+        for m in ("llm", "voice", "music"):
+            assert d2["effective"][m]["source"] == "global-fallback"
+        assert d2["effective"]["llm"]["provider"] == "openai"
+        assert d2["effective"]["voice"]["provider"] == "elevenlabs"
+        assert d2["effective"]["music"]["provider"] == "suno"
+
+        # 3. Mock mode and flags MUST remain off
+        assert d2["mock_mode"] is True
+        for m in ("llm", "image", "video", "voice", "music", "export"):
+            assert d2["feature_flags"][m] is False
+
+        # 4. Test endpoint reflects the effective source for each modality
+        for m, expected_source in (
+            ("image", "project"),
+            ("video", "project"),
+            ("export", "project"),
+            ("llm", "global-fallback"),
+            ("voice", "global-fallback"),
+            ("music", "global-fallback"),
+        ):
+            tr = s.post(f"{API}/projects/{pid}/providers/test", json={"modality": m}).json()
+            assert tr["mock_mode"] is True
+            assert tr["real_provider_enabled"] is False
+            assert tr["source"] == expected_source
+            assert "Mock mode" in tr["message"]
+    finally:
+        s.delete(f"{API}/projects/{pid}")

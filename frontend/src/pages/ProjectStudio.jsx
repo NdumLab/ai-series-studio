@@ -73,15 +73,21 @@ const STAGES = [
 export default function ProjectStudio() {
   const { id } = useParams();
   const [data, setData] = useState(null);
+  const [providers, setProviders] = useState(null);
   const [options, setOptions] = useState({ voices: [], music_moods: [], costs: {} });
   const [tab, setTab] = useState("story");
 
   const load = useCallback(() => Projects.get(id).then(setData), [id]);
+  const loadProviders = useCallback(
+    () => ProjectProviders.get(id).then(setProviders),
+    [id]
+  );
 
   useEffect(() => {
     load();
+    loadProviders();
     Meta.options().then(setOptions);
-  }, [load]);
+  }, [load, loadProviders]);
 
   if (!data) return <div className="text-[#A1A1AA] text-sm">Loading project…</div>;
   const { project, scenes, characters } = data;
@@ -143,7 +149,12 @@ export default function ProjectStudio() {
         </TabsList>
 
         <TabsContent value="story" className="mt-6">
-          <StoryTab project={project} reload={load} onContinue={() => setTab("scenes")} />
+          <StoryTab
+            project={project}
+            providers={providers}
+            reload={load}
+            onContinue={() => setTab("scenes")}
+          />
         </TabsContent>
         <TabsContent value="scenes" className="mt-6">
           <ScenesTab
@@ -163,19 +174,24 @@ export default function ProjectStudio() {
           />
         </TabsContent>
         <TabsContent value="images" className="mt-6">
-          <ImagesTab scenes={scenes} reload={load} />
+          <ImagesTab scenes={scenes} providers={providers} reload={load} />
         </TabsContent>
         <TabsContent value="segments" className="mt-6">
-          <SegmentsTab scenes={scenes} reload={load} />
+          <SegmentsTab scenes={scenes} providers={providers} reload={load} />
         </TabsContent>
         <TabsContent value="voice-music" className="mt-6">
-          <VoiceMusicTab scenes={scenes} options={options} reload={load} />
+          <VoiceMusicTab
+            scenes={scenes}
+            options={options}
+            providers={providers}
+            reload={load}
+          />
         </TabsContent>
         <TabsContent value="export" className="mt-6">
-          <ExportTab projectId={id} />
+          <ExportTab projectId={id} providers={providers} />
         </TabsContent>
         <TabsContent value="providers" className="mt-6">
-          <ProvidersTab projectId={id} />
+          <ProvidersTab projectId={id} onChanged={loadProviders} />
         </TabsContent>
       </Tabs>
     </div>
@@ -250,7 +266,7 @@ function CostBadge({ projectId }) {
 // ---------------------------------------------------------------------------
 // Story tab
 // ---------------------------------------------------------------------------
-function StoryTab({ project, reload, onContinue }) {
+function StoryTab({ project, providers, reload, onContinue }) {
   const [idea, setIdea] = useState(project.idea || "");
   const [story, setStory] = useState(project.rewritten_story || "");
   const [busy, setBusy] = useState(false);
@@ -297,7 +313,13 @@ function StoryTab({ project, reload, onContinue }) {
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div className="space-y-4">
+      <ProviderHint
+        providers={providers}
+        modality="llm"
+        action="story rewrite"
+      />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <div className="es-card p-6">
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-display text-lg font-bold">Idea / Logline</h3>
@@ -361,6 +383,7 @@ function StoryTab({ project, reload, onContinue }) {
         >
           <Split className="w-4 h-4 mr-2" /> {busy ? "Splitting…" : "Save & split into scenes →"}
         </Button>
+      </div>
       </div>
     </div>
   );
@@ -554,14 +577,60 @@ function InfoCallout({ text }) {
 }
 
 // ---------------------------------------------------------------------------
+// Inline provider hint — informational only, mock-only
+// ---------------------------------------------------------------------------
+function ProviderHint({ providers, modality, action, testId }) {
+  if (!providers) return null;
+  const eff = providers.effective?.[modality];
+  if (!eff) return null;
+  const overrideOn = providers.provider_override_enabled;
+  // Show project-source vs anything else; "global" and "global-fallback" both fall back to global defaults
+  const usingProject = overrideOn && eff.source === "project";
+  const provider = eff.provider || "—";
+  const model = eff.model || (eff.custom_model || "—");
+  const displayProvider =
+    eff.provider === "custom"
+      ? `custom${eff.custom_provider ? `:${eff.custom_provider}` : ""}`
+      : provider;
+  return (
+    <div
+      className="es-card p-3 flex flex-wrap items-center gap-2 border-white/10 bg-white/[0.02]"
+      data-testid={testId || `provider-hint-${modality}`}
+    >
+      <PlugZap className="w-3.5 h-3.5 text-[#FF3B30] shrink-0" />
+      <span className="text-xs text-[#A1A1AA]">
+        This {action} would use:{" "}
+        <span
+          className="text-white font-mono"
+          data-testid={`hint-text-${modality}`}
+        >
+          {displayProvider}/{model}
+        </span>
+      </span>
+      <span
+        data-testid={`hint-badge-${modality}`}
+        className={`ml-auto px-2 py-0.5 rounded-md text-[10px] font-mono uppercase tracking-widest border ${
+          usingProject
+            ? "border-[#FF3B30]/40 text-[#FF3B30]"
+            : "border-white/15 text-[#A1A1AA]"
+        }`}
+      >
+        {usingProject ? "Project Override Active" : "Using Global Default"}
+      </span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Images tab — generate / approve scene images
 // ---------------------------------------------------------------------------
-function ImagesTab({ scenes, reload }) {
+function ImagesTab({ scenes, providers, reload }) {
   if (!scenes.length) {
     return <EmptyState text="Split your story into scenes first to generate images." />;
   }
   return (
     <div className="space-y-3">
+      <ProviderHint providers={providers} modality="image" action="image generation" />
       <InfoCallout text="Generate or regenerate one image per scene. The image becomes the visual anchor for video generation." />
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" data-testid="images-grid">
         {scenes.map((s, i) => (
@@ -623,12 +692,13 @@ function SceneImageCard({ scene, index, reload }) {
 // ---------------------------------------------------------------------------
 // Video Segments tab
 // ---------------------------------------------------------------------------
-function SegmentsTab({ scenes, reload }) {
+function SegmentsTab({ scenes, providers, reload }) {
   if (!scenes.length) {
     return <EmptyState text="Split your story into scenes first." />;
   }
   return (
     <div className="space-y-4" data-testid="segments-tab">
+      <ProviderHint providers={providers} modality="video" action="video generation" />
       <InfoCallout text="Each scene contains 5-second video segments. Use 'Expand next 5s' to chain a continuation that references the previous segment." />
       {scenes.map((s, i) => (
         <SceneSegmentBlock key={s.id} scene={s} index={i} reload={reload} />
@@ -841,12 +911,16 @@ function SegmentCard({ segment, index, parent, reload }) {
 // ---------------------------------------------------------------------------
 // Voice / Music tab
 // ---------------------------------------------------------------------------
-function VoiceMusicTab({ scenes, options, reload }) {
+function VoiceMusicTab({ scenes, options, providers, reload }) {
   if (!scenes.length) {
     return <EmptyState text="Split your story into scenes first." />;
   }
   return (
     <div className="space-y-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <ProviderHint providers={providers} modality="voice" action="voice generation" />
+        <ProviderHint providers={providers} modality="music" action="music generation" />
+      </div>
       <InfoCallout text="Pick the narrator voice and music mood for each scene. Voice and music will be rendered into the final mix." />
       <div className="space-y-3" data-testid="voice-music-list">
         {scenes.map((s, i) => (
@@ -1029,7 +1103,7 @@ function CharactersTab({ project, characters, voices, reload }) {
 // ---------------------------------------------------------------------------
 // Export tab
 // ---------------------------------------------------------------------------
-function ExportTab({ projectId }) {
+function ExportTab({ projectId, providers }) {
   const [data, setData] = useState(null);
   useEffect(() => {
     Projects.export(projectId).then(setData);
@@ -1037,8 +1111,10 @@ function ExportTab({ projectId }) {
   if (!data) return <div className="text-[#A1A1AA] text-sm">Loading export…</div>;
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4" data-testid="export-view">
-      <div className="lg:col-span-2 es-card p-4">
+    <div className="space-y-4" data-testid="export-view">
+      <ProviderHint providers={providers} modality="export" action="export" />
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-2 es-card p-4">
         <div className="aspect-video bg-black rounded-md border border-white/10 overflow-hidden mb-4 relative">
           {data.ready ? (
             <video src={data.final_video_url} controls className="w-full h-full" data-testid="final-video" />
@@ -1078,6 +1154,7 @@ function ExportTab({ projectId }) {
           </ul>
         )}
       </div>
+      </div>
     </div>
   );
 }
@@ -1098,7 +1175,7 @@ const PROVIDER_SECTIONS = [
   { key: "export", label: "Export", icon: Save },
 ];
 
-function ProvidersTab({ projectId }) {
+function ProvidersTab({ projectId, onChanged }) {
   const [data, setData] = useState(null);
   const [catalog, setCatalog] = useState(null);
   const [draft, setDraft] = useState(null);
@@ -1138,6 +1215,7 @@ function ProvidersTab({ projectId }) {
     });
     setDraft((p) => ({ ...p, provider_override_enabled: next }));
     setData(updated);
+    onChanged?.();
     toast.success(next ? "Project override enabled" : "Reverted to global defaults");
   };
 
@@ -1163,6 +1241,7 @@ function ProvidersTab({ projectId }) {
     try {
       const res = await ProjectProviders.update(projectId, draft);
       setData(res);
+      onChanged?.();
       toast.success("Project providers saved");
     } catch {
       toast.error("Save failed");
