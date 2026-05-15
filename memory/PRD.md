@@ -185,3 +185,22 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 5 · voice 1
 - Dashboard: new **Sort by** chip-row above the projects grid — `Newest` (default), `Title A→Z`, `Cost ↓`, `Cost ↑`. Sort is client-side using the existing `cost_summary.grand_total_credits`; no backend change required.
 - Tests: 53/53 backend cases pass. Added: `test_reduce_to_draft_basic_and_idempotent` (4 segments → 1 segment, saves 36 credits, second call deletes 0) and `test_reduce_to_draft_404_unknown_scene`.
 - Mock-only invariants preserved.
+
+## Iteration 12 (2026-02) — Continuity prompt editor + scene/segment reorder
+- Backend additions:
+  - `PUT /api/segments/{id}` — generic partial update accepting `continuity_prompt`, `expand_mode`, `duration`, `status`. The dedicated `/status` route still works.
+  - `PUT /api/projects/{id}/scenes/reorder` — payload `{scene_ids:[...]}`. Validates the list is exactly the project's scenes (no foreign IDs, no missing IDs); rewrites each scene's `order`. Returns the reordered list.
+  - `PUT /api/scenes/{id}/segments/reorder` — payload `{segment_ids:[...]}`. Same validation against the scene's segments; rewrites `order` AND recomputes `start_second` cumulatively from each segment's `duration`.
+- Frontend additions:
+  - New `<SortableList>` wrapper (`@dnd-kit/core` + `@dnd-kit/sortable`) with a small `GripVertical` drag handle. Drag is restricted to the handle so form inputs and buttons inside cards continue to work normally.
+  - Scenes tab now renders SceneEditors inside a vertical SortableList; drag end → `Scenes.reorder(projectId, ids)` → `reloadAll()`.
+  - Each `SceneSegmentBlock` now renders SegmentCards in a grid SortableList; drag end → `Scenes.reorderSegments(sceneId, ids)` → `reloadAll()` (cost badge + scene-costs auto-refresh).
+  - Per-segment **Continuity prompt** editor on each SegmentCard with save-on-blur and a tiny status indicator: idle → `Saving…` → `Saved` (auto-fade after 1.5s) → `Failed to save` on error. Persists via the new generic `PUT /api/segments/{id}`.
+- Tests: **59/59 backend cases pass.** Added 6 cases:
+  - `test_segment_continuity_prompt_update` (round-trips + trims, `/status` route still works, empty body 400, bad duration 400)
+  - `test_scene_reorder_success` (reverse 6 scenes, `order` rewritten, persisted)
+  - `test_scene_reorder_rejects_foreign_or_partial` (foreign-project scene 400, missing scene 400)
+  - `test_segment_reorder_success_recomputes_start_second` (3 segments reversed → start_seconds = 0/5/10, orders 0/1/2)
+  - `test_segment_reorder_rejects_foreign` (foreign-scene segment 400, empty list 400)
+  - `test_existing_expand_and_costs_still_work_after_reorder` (post-reorder, expand chains parent_segment_id correctly + scene-costs reflects 2 segments → 27 credits)
+- Mock-only invariants preserved; all 6 `USE_REAL_*_PROVIDER` flags still false; no API key fields.

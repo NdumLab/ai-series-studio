@@ -34,11 +34,21 @@ export const Scenes = {
   generateSegment: (id) => api.post(`/scenes/${id}/segments`).then((r) => r.data),
   expand: (id) => api.post(`/scenes/${id}/expand`).then((r) => r.data),
   reduceToDraft: (id) => api.post(`/scenes/${id}/reduce-to-draft`).then((r) => r.data),
+  reorder: (projectId, sceneIds) =>
+    api
+      .put(`/projects/${projectId}/scenes/reorder`, { scene_ids: sceneIds })
+      .then((r) => r.data),
+  reorderSegments: (sceneId, segmentIds) =>
+    api
+      .put(`/scenes/${sceneId}/segments/reorder`, { segment_ids: segmentIds })
+      .then((r) => r.data),
 };
 
 export const Segments = {
   setStatus: (id, status) =>
     api.put(`/segments/${id}/status`, { status }).then((r) => r.data),
+  update: (id, payload) =>
+    api.put(`/segments/${id}`, payload).then((r) => r.data),
   regenerate: (id) => api.post(`/segments/${id}/regenerate`).then((r) => r.data),
   remove: (id) => api.delete(`/segments/${id}`).then((r) => r.data),
 };

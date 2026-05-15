@@ -371,6 +371,21 @@ class SegmentStatus(BaseModel):
     status: Literal["approved", "rejected", "pending"]
 
 
+class SegmentUpdate(BaseModel):
+    continuity_prompt: Optional[str] = None
+    expand_mode: Optional[Literal["initial", "expand"]] = None
+    duration: Optional[int] = None
+    status: Optional[Literal["approved", "rejected", "pending"]] = None
+
+
+class ReorderScenesBody(BaseModel):
+    scene_ids: List[str]
+
+
+class ReorderSegmentsBody(BaseModel):
+    segment_ids: List[str]
+
+
 class SegmentCreate(BaseModel):
     continuity_prompt: Optional[str] = None
 
@@ -1024,6 +1039,71 @@ async def set_segment_status(segment_id: str, body: SegmentStatus):
     if res.matched_count == 0:
         raise HTTPException(404, "Segment not found")
     return await db.segments.find_one({"id": segment_id}, {"_id": 0})
+
+
+@api.put("/segments/{segment_id}")
+async def update_segment(segment_id: str, body: SegmentUpdate):
+    """Generic partial update for a segment. Coexists with the dedicated
+    /status route — both write to the same fields."""
+    update = {k: v for k, v in body.model_dump(exclude_none=True).items()}
+    if not update:
+        raise HTTPException(400, "No fields to update")
+    if "continuity_prompt" in update and update["continuity_prompt"] is not None:
+        update["continuity_prompt"] = update["continuity_prompt"].strip()
+    if "duration" in update and update["duration"] is not None:
+        if update["duration"] <= 0:
+            raise HTTPException(400, "duration must be > 0")
+    res = await db.segments.update_one({"id": segment_id}, {"$set": update})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Segment not found")
+    return await db.segments.find_one({"id": segment_id}, {"_id": 0})
+
+
+@api.put("/projects/{project_id}/scenes/reorder")
+async def reorder_scenes(project_id: str, body: ReorderScenesBody):
+    proj = await db.projects.find_one({"id": project_id}, {"_id": 0, "id": 1})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    existing = await db.scenes.find(
+        {"project_id": project_id}, {"_id": 0, "id": 1}
+    ).to_list(500)
+    existing_ids = {s["id"] for s in existing}
+    incoming = list(body.scene_ids)
+    if len(incoming) != len(existing_ids) or set(incoming) != existing_ids:
+        raise HTTPException(400, "scene_ids must include every scene of this project exactly once")
+    for i, sid in enumerate(incoming):
+        await db.scenes.update_one({"id": sid, "project_id": project_id}, {"$set": {"order": i}})
+    scenes = await db.scenes.find({"project_id": project_id}, {"_id": 0}).sort("order", 1).to_list(500)
+    return {"scenes": scenes}
+
+
+@api.put("/scenes/{scene_id}/segments/reorder")
+async def reorder_segments(scene_id: str, body: ReorderSegmentsBody):
+    scene = await db.scenes.find_one({"id": scene_id}, {"_id": 0, "id": 1})
+    if not scene:
+        raise HTTPException(404, "Scene not found")
+    existing = await db.segments.find(
+        {"scene_id": scene_id}, {"_id": 0}
+    ).to_list(200)
+    existing_ids = {s["id"] for s in existing}
+    incoming = list(body.segment_ids)
+    if len(incoming) != len(existing_ids) or set(incoming) != existing_ids:
+        raise HTTPException(400, "segment_ids must include every segment of this scene exactly once")
+
+    by_id = {s["id"]: s for s in existing}
+    start = 0
+    for i, sid in enumerate(incoming):
+        seg = by_id[sid]
+        dur = int(seg.get("duration") or 5)
+        await db.segments.update_one(
+            {"id": sid, "scene_id": scene_id},
+            {"$set": {"order": i, "start_second": start}},
+        )
+        start += dur
+    segments = await db.segments.find(
+        {"scene_id": scene_id}, {"_id": 0}
+    ).sort("order", 1).to_list(200)
+    return {"segments": segments}
 
 
 @api.post("/segments/{segment_id}/regenerate")

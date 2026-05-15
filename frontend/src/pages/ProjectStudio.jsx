@@ -51,6 +51,7 @@ import {
   DialogTrigger,
 } from "../components/ui/dialog";
 import { Badge } from "../components/ui/badge";
+import { SortableList } from "../components/SortableList";
 import {
   Projects,
   Scenes,
@@ -614,21 +615,34 @@ function ScenesTab({ project, scenes, characters, options, voiceResolution, scen
         </div>
       </div>
       <InfoCallout
-        text="Edit titles, locations, prompts and dialogue here. Image and video generation happen in their own tabs."
+        text="Edit titles, locations, prompts and dialogue here. Drag the grip handle to reorder scenes. Image and video generation happen in their own tabs."
       />
-      {scenes.map((s, i) => (
-        <SceneEditor
-          key={s.id}
-          index={i}
-          scene={s}
-          characters={characters}
-          options={options}
-          voiceResolution={voiceResolution}
-          costRow={sceneCostMap[s.id]}
-          highCostThreshold={threshold}
-          reload={reload}
-        />
-      ))}
+      <SortableList
+        items={scenes}
+        getId={(s) => s.id}
+        testId="sortable-scenes"
+        onReorder={async (ids) => {
+          try {
+            await Scenes.reorder(project.id, ids);
+            reload();
+          } catch {
+            toast.error("Reorder failed");
+          }
+        }}
+        renderItem={(s, handle) => (
+          <SceneEditor
+            scene={s}
+            index={scenes.findIndex((x) => x.id === s.id)}
+            characters={characters}
+            options={options}
+            voiceResolution={voiceResolution}
+            costRow={sceneCostMap[s.id]}
+            highCostThreshold={threshold}
+            dragHandle={handle}
+            reload={reload}
+          />
+        )}
+      />
       <AddSceneButton projectId={project.id} reload={reload} />
     </div>
   );
@@ -658,7 +672,7 @@ function AddSceneButton({ projectId, reload }) {
   );
 }
 
-function SceneEditor({ index, scene, characters, options, voiceResolution, costRow, highCostThreshold, reload }) {
+function SceneEditor({ index, scene, characters, options, voiceResolution, costRow, highCostThreshold, dragHandle, reload }) {
   const [local, setLocal] = useState(scene);
   useEffect(() => setLocal(scene), [scene]);
   const patch = (k, v) => setLocal((p) => ({ ...p, [k]: v }));
@@ -696,6 +710,7 @@ function SceneEditor({ index, scene, characters, options, voiceResolution, costR
     <div className="es-card p-5" data-testid={`scene-${scene.id}`}>
       <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
         <div className="flex items-center gap-3">
+          {dragHandle}
           <span className="font-mono text-[10px] uppercase tracking-widest text-[#A1A1AA]">
             Scene {String(index + 1).padStart(2, "0")}
           </span>
@@ -1095,24 +1110,53 @@ function SceneSegmentBlock({ scene, index, reload }) {
       {segments.length === 0 ? (
         <p className="text-xs text-[#A1A1AA]">No segments yet. Generate the first 5 seconds.</p>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {segments.map((seg, i) => (
+        <SortableList
+          items={segments}
+          getId={(seg) => seg.id}
+          direction="grid"
+          testId={`sortable-segments-${scene.id}`}
+          onReorder={async (ids) => {
+            try {
+              await Scenes.reorderSegments(scene.id, ids);
+              reload();
+            } catch {
+              toast.error("Reorder failed");
+            }
+          }}
+          renderItem={(seg, handle, i) => (
             <SegmentCard
-              key={seg.id}
               segment={seg}
               index={i}
               parent={segments.find((p) => p.id === seg.parent_segment_id) || null}
+              dragHandle={handle}
               reload={reload}
             />
-          ))}
-        </div>
+          )}
+        />
       )}
     </div>
   );
 }
 
-function SegmentCard({ segment, index, parent, reload }) {
+function SegmentCard({ segment, index, parent, dragHandle, reload }) {
   const [busy, setBusy] = useState(false);
+  const [continuity, setContinuity] = useState(segment.continuity_prompt || "");
+  const [saveState, setSaveState] = useState("idle"); // idle | saving | saved | error
+  useEffect(() => {
+    setContinuity(segment.continuity_prompt || "");
+  }, [segment.continuity_prompt]);
+
+  const persistContinuity = async () => {
+    if ((continuity || "").trim() === (segment.continuity_prompt || "").trim()) return;
+    setSaveState("saving");
+    try {
+      await Segments.update(segment.id, { continuity_prompt: continuity });
+      setSaveState("saved");
+      setTimeout(() => setSaveState((s) => (s === "saved" ? "idle" : s)), 1500);
+    } catch {
+      setSaveState("error");
+    }
+  };
 
   const setStatus = async (status) => {
     setBusy(true);
@@ -1160,8 +1204,13 @@ function SegmentCard({ segment, index, parent, reload }) {
 
   return (
     <div className="es-card p-3" data-testid={`segment-${segment.id}`}>
-      <div className="aspect-video bg-black rounded-md overflow-hidden mb-3 border border-white/10">
+      <div className="aspect-video bg-black rounded-md overflow-hidden mb-3 border border-white/10 relative">
         <video src={segment.video_url} controls className="w-full h-full" muted />
+        {dragHandle && (
+          <div className="absolute top-1 left-1 bg-black/70 rounded backdrop-blur">
+            {dragHandle}
+          </div>
+        )}
       </div>
 
       <div className="flex items-center justify-between mb-2">
@@ -1194,13 +1243,42 @@ function SegmentCard({ segment, index, parent, reload }) {
         </dd>
       </dl>
 
-      {segment.continuity_prompt && (
-        <p
-          className="text-[10px] text-[#A1A1AA] mb-3 line-clamp-2"
-          data-testid={`segment-continuity-${segment.id}`}
-        >
-          ↳ {segment.continuity_prompt}
-        </p>
+      {segment.continuity_prompt !== undefined && (
+        <div className="mb-3" data-testid={`continuity-edit-${segment.id}`}>
+          <label className="es-label flex items-center justify-between mb-1">
+            <span>Continuity prompt</span>
+            <span
+              className="font-mono normal-case tracking-normal"
+              data-testid={`continuity-state-${segment.id}`}
+              style={{
+                color:
+                  saveState === "saving"
+                    ? "#A1A1AA"
+                    : saveState === "saved"
+                      ? "#34C759"
+                      : saveState === "error"
+                        ? "#FF3B30"
+                        : "#52525B",
+              }}
+            >
+              {saveState === "saving"
+                ? "Saving…"
+                : saveState === "saved"
+                  ? "Saved"
+                  : saveState === "error"
+                    ? "Failed to save"
+                    : ""}
+            </span>
+          </label>
+          <Textarea
+            value={continuity}
+            onChange={(e) => setContinuity(e.target.value)}
+            onBlur={persistContinuity}
+            data-testid={`continuity-input-${segment.id}`}
+            placeholder="↳ Continue smoothly from the previous clip…"
+            className="bg-[#0A0A0A] border-white/10 text-white text-xs min-h-[52px]"
+          />
+        </div>
       )}
 
       <div className="grid grid-cols-4 gap-1.5">

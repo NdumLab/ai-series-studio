@@ -1053,3 +1053,149 @@ def test_reduce_to_draft_basic_and_idempotent(s):
 def test_reduce_to_draft_404_unknown_scene(s):
     r = s.post(f"{API}/scenes/does-not-exist/reduce-to-draft")
     assert r.status_code == 404
+
+
+# ---------- Continuity prompt + segment partial update ----------
+def test_segment_continuity_prompt_update(s):
+    p = s.post(f"{API}/projects", json={"title": "TEST_Cont", "idea": "x"}).json()
+    pid = p["id"]
+    try:
+        sc = s.post(f"{API}/projects/{pid}/scenes", json={"title": "TEST_C"}).json()
+        seg = _retry(lambda: s.post(f"{API}/scenes/{sc['id']}/segments")).json()
+        r = s.put(
+            f"{API}/segments/{seg['id']}",
+            json={"continuity_prompt": "  Continue smoothly into a wide shot.  "},
+        )
+        assert r.status_code == 200
+        d = r.json()
+        assert d["continuity_prompt"] == "Continue smoothly into a wide shot."
+        # Existing dedicated status route still works
+        r2 = s.put(f"{API}/segments/{seg['id']}/status", json={"status": "approved"})
+        assert r2.json()["status"] == "approved"
+        # Empty body rejected
+        r3 = s.put(f"{API}/segments/{seg['id']}", json={})
+        assert r3.status_code == 400
+        # Bad duration rejected
+        r4 = s.put(f"{API}/segments/{seg['id']}", json={"duration": 0})
+        assert r4.status_code == 400
+    finally:
+        s.delete(f"{API}/projects/{pid}")
+
+
+# ---------- Scene reorder ----------
+def test_scene_reorder_success(s):
+    p = s.post(f"{API}/projects", json={"title": "TEST_Reorder", "idea": "x"}).json()
+    pid = p["id"]
+    try:
+        s.post(f"{API}/projects/{pid}/rewrite")
+        s.post(f"{API}/projects/{pid}/split-scenes")
+        scenes = s.get(f"{API}/projects/{pid}").json()["scenes"]
+        ids = [sc["id"] for sc in scenes]
+        # Reverse the order
+        new_order = list(reversed(ids))
+        r = s.put(f"{API}/projects/{pid}/scenes/reorder", json={"scene_ids": new_order})
+        assert r.status_code == 200
+        out = r.json()["scenes"]
+        assert [sc["id"] for sc in out] == new_order
+        for i, sc in enumerate(out):
+            assert sc["order"] == i
+        # Re-read and confirm persisted
+        scenes2 = s.get(f"{API}/projects/{pid}").json()["scenes"]
+        assert [sc["id"] for sc in scenes2] == new_order
+    finally:
+        s.delete(f"{API}/projects/{pid}")
+
+
+def test_scene_reorder_rejects_foreign_or_partial(s):
+    p1 = s.post(f"{API}/projects", json={"title": "TEST_R1", "idea": "x"}).json()
+    p2 = s.post(f"{API}/projects", json={"title": "TEST_R2", "idea": "y"}).json()
+    try:
+        s.post(f"{API}/projects/{p1['id']}/rewrite")
+        s.post(f"{API}/projects/{p1['id']}/split-scenes")
+        s.post(f"{API}/projects/{p2['id']}/rewrite")
+        s.post(f"{API}/projects/{p2['id']}/split-scenes")
+        s1_ids = [sc["id"] for sc in s.get(f"{API}/projects/{p1['id']}").json()["scenes"]]
+        s2_ids = [sc["id"] for sc in s.get(f"{API}/projects/{p2['id']}").json()["scenes"]]
+        # Mix in a foreign scene id
+        bad = [s2_ids[0]] + s1_ids[1:]
+        r = s.put(f"{API}/projects/{p1['id']}/scenes/reorder", json={"scene_ids": bad})
+        assert r.status_code == 400
+        # Subset of own scenes (missing one) is also rejected
+        r2 = s.put(f"{API}/projects/{p1['id']}/scenes/reorder", json={"scene_ids": s1_ids[:-1]})
+        assert r2.status_code == 400
+    finally:
+        s.delete(f"{API}/projects/{p1['id']}")
+        s.delete(f"{API}/projects/{p2['id']}")
+
+
+# ---------- Segment reorder ----------
+def test_segment_reorder_success_recomputes_start_second(s):
+    p = s.post(f"{API}/projects", json={"title": "TEST_SegReorder", "idea": "x"}).json()
+    pid = p["id"]
+    try:
+        sc = s.post(f"{API}/projects/{pid}/scenes", json={"title": "TEST_SR"}).json()
+        a = _retry(lambda: s.post(f"{API}/scenes/{sc['id']}/segments")).json()
+        b = _retry(lambda: s.post(f"{API}/scenes/{sc['id']}/expand")).json()
+        c = _retry(lambda: s.post(f"{API}/scenes/{sc['id']}/expand")).json()
+        # Reverse order
+        new_ids = [c["id"], b["id"], a["id"]]
+        r = s.put(f"{API}/scenes/{sc['id']}/segments/reorder", json={"segment_ids": new_ids})
+        assert r.status_code == 200
+        segs = r.json()["segments"]
+        assert [seg["id"] for seg in segs] == new_ids
+        # start_second recomputed cumulatively from duration=5 each
+        assert [seg["start_second"] for seg in segs] == [0, 5, 10]
+        assert [seg["order"] for seg in segs] == [0, 1, 2]
+    finally:
+        s.delete(f"{API}/projects/{pid}")
+
+
+def test_segment_reorder_rejects_foreign(s):
+    p = s.post(f"{API}/projects", json={"title": "TEST_SegFor", "idea": "x"}).json()
+    pid = p["id"]
+    try:
+        sc1 = s.post(f"{API}/projects/{pid}/scenes", json={"title": "TEST_SR1"}).json()
+        sc2 = s.post(f"{API}/projects/{pid}/scenes", json={"title": "TEST_SR2"}).json()
+        a = _retry(lambda: s.post(f"{API}/scenes/{sc1['id']}/segments")).json()
+        b = _retry(lambda: s.post(f"{API}/scenes/{sc2['id']}/segments")).json()
+        # Try to reorder scene1 with scene2's segment mixed in
+        r = s.put(
+            f"{API}/scenes/{sc1['id']}/segments/reorder",
+            json={"segment_ids": [b["id"], a["id"]]},
+        )
+        assert r.status_code == 400
+        # Partial set also rejected
+        r2 = s.put(
+            f"{API}/scenes/{sc1['id']}/segments/reorder",
+            json={"segment_ids": []},
+        )
+        assert r2.status_code == 400
+    finally:
+        s.delete(f"{API}/projects/{pid}")
+
+
+def test_existing_expand_and_costs_still_work_after_reorder(s):
+    """Smoke: reorder + expand + scene-costs all coexist correctly."""
+    p = s.post(f"{API}/projects", json={"title": "TEST_Smoke2", "idea": "x"}).json()
+    pid = p["id"]
+    try:
+        s.post(f"{API}/projects/{pid}/rewrite")
+        s.post(f"{API}/projects/{pid}/split-scenes")
+        scenes = s.get(f"{API}/projects/{pid}").json()["scenes"]
+        # reverse scenes
+        new_order = list(reversed([sc["id"] for sc in scenes]))
+        s.put(f"{API}/projects/{pid}/scenes/reorder", json={"scene_ids": new_order})
+
+        # Expand scene[0] (now last-of-original)
+        target = new_order[0]
+        seg1 = _retry(lambda: s.post(f"{API}/scenes/{target}/segments")).json()
+        seg2 = _retry(lambda: s.post(f"{API}/scenes/{target}/expand")).json()
+        assert seg2["expand_mode"] == "expand"
+        assert seg2["parent_segment_id"] == seg1["id"]
+        # scene-costs reflects 2 segments under that scene
+        cs = s.get(f"{API}/projects/{pid}/scene-costs").json()
+        row = next(r for r in cs["scenes"] if r["scene_id"] == target)
+        assert row["segments_count"] == 2
+        assert row["total_credits"] == 2 + 12 * 2 + 1
+    finally:
+        s.delete(f"{API}/projects/{pid}")
