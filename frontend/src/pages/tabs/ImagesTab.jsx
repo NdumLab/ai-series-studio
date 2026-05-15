@@ -6,6 +6,7 @@ import { ProviderHintChip } from "../../components/studio/ProviderHintChip";
 import { InfoCallout } from "../../components/studio/InfoCallout";
 import { EmptyState } from "../../components/studio/EmptyState";
 import { Creative, Scenes } from "../../lib/api";
+import { withRealLLMToast } from "../../lib/llmToast";
 
 const IMAGE_HINT =
   "This image prompt is enhanced for: realism, lighting, character consistency, camera framing.";
@@ -54,8 +55,13 @@ function SceneImageCard({ scene, index, reload }) {
   const enhance = async () => {
     setEnhancing(true);
     try {
-      await Creative.enhanceScene(scene.id, "image-prompt");
-      toast.success("Image prompt enhanced");
+      const res = await withRealLLMToast(
+        "enhance image prompt",
+        () => Creative.enhanceScene(scene.id, "image-prompt")
+      );
+      if (res?.llm_mode !== "real" && res?.llm_status !== "fallback") {
+        toast.success("Image prompt enhanced");
+      }
       reload();
     } catch {
       toast.error("Enhance failed");

@@ -7,6 +7,7 @@ import { ProviderHintChip } from "../../components/studio/ProviderHintChip";
 import { QualityScorePanel } from "../../components/studio/QualityScorePanel";
 import { ImproveStoryMenu } from "../../components/studio/ImproveStoryMenu";
 import { Projects } from "../../lib/api";
+import { withRealLLMToast } from "../../lib/llmToast";
 
 export function StoryTab({ project, providers, options, reload, onContinue }) {
   const [idea, setIdea] = useState(project.idea || "");
@@ -22,12 +23,14 @@ export function StoryTab({ project, providers, options, reload, onContinue }) {
     setBusy(true);
     try {
       await Projects.update(project.id, { idea });
-      const res = await Projects.rewrite(project.id);
+      const res = await withRealLLMToast("story rewrite", () => Projects.rewrite(project.id));
       setStory(res.rewritten_story);
-      toast.success(`Story rewritten · -${res.cost} credits`);
+      if (res.llm_mode !== "real" && res.llm_status !== "fallback") {
+        toast.success(`Story rewritten · -${res.cost} credits`);
+      }
       reload();
     } catch {
-      toast.error("Rewrite failed");
+      // withRealLLMToast already toasted error; nothing extra needed.
     } finally {
       setBusy(false);
     }

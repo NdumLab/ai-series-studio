@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 import { Creative } from "../../lib/api";
+import { withRealLLMToast } from "../../lib/llmToast";
 
 const IMPROVE_OPTIONS = [
   { kind: "suspenseful", label: "Make more suspenseful" },
@@ -27,10 +28,19 @@ export function ImproveStoryMenu({ projectId, disabled, onImproved }) {
   const run = async (kind) => {
     setBusy(true);
     try {
-      const res = await Creative.improveStory(projectId, kind);
-      toast.success(res.improvement.note);
+      const res = await withRealLLMToast(
+        `improve story (${kind})`,
+        () => Creative.improveStory(projectId, kind)
+      );
+      // Mock mode: surface the per-kind note as a small toast. Real mode:
+      // the LLM toast already displayed completion timing.
+      if (res?.llm_mode !== "real" && res?.llm_status !== "fallback") {
+        toast.success(res.improvement.note);
+      }
       onImproved?.(res);
-    } catch (e) {
+    } catch {
+      // withRealLLMToast handled the error toast in real mode; show fallback
+      // for mock mode where the helper short-circuited.
       toast.error("Improve failed");
     } finally {
       setBusy(false);

@@ -8,6 +8,7 @@ import { InfoCallout } from "../../components/studio/InfoCallout";
 import { EmptyState } from "../../components/studio/EmptyState";
 import { SegmentCard } from "../../components/studio/SegmentCard";
 import { Creative, Scenes } from "../../lib/api";
+import { withRealLLMToast } from "../../lib/llmToast";
 
 const VIDEO_HINT =
   "This video prompt is enhanced for: motion, continuity, emotion, camera movement.";
@@ -72,8 +73,13 @@ function SceneSegmentBlock({ scene, index, setData, reload }) {
   const enhance = async () => {
     setBusy(true);
     try {
-      await Creative.enhanceScene(scene.id, "video-prompt");
-      toast.success("Video prompt enhanced");
+      const res = await withRealLLMToast(
+        "enhance video prompt",
+        () => Creative.enhanceScene(scene.id, "video-prompt")
+      );
+      if (res?.llm_mode !== "real" && res?.llm_status !== "fallback") {
+        toast.success("Video prompt enhanced");
+      }
       reload();
     } catch {
       toast.error("Enhance failed");

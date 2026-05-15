@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { Flame, Theater, MessageSquare } from "lucide-react";
 import { Button } from "../ui/button";
 import { Creative } from "../../lib/api";
+import { withRealLLMToast } from "../../lib/llmToast";
 
 function tensionColor(v) {
   const n = Number(v) || 0;
@@ -18,12 +19,18 @@ export function SceneTensionMeter({ scene, onImproved }) {
   const run = async (kind) => {
     setBusy(true);
     try {
-      const res = await Creative.enhanceScene(scene.id, kind);
-      toast.success(
-        kind === "scene-drama"
-          ? `Drama boosted · tension ${res.scene.tension_level}`
-          : "Dialogue improved"
+      const res = await withRealLLMToast(
+        kind === "scene-drama" ? "improve scene drama" : "improve dialogue",
+        () => Creative.enhanceScene(scene.id, kind)
       );
+      // Only show the legacy short toast in mock mode.
+      if (res?.llm_mode !== "real" && res?.llm_status !== "fallback") {
+        toast.success(
+          kind === "scene-drama"
+            ? `Drama boosted · tension ${res.scene.tension_level}`
+            : "Dialogue improved"
+        );
+      }
       onImproved?.(res.scene);
     } catch {
       toast.error("Enhancement failed");

@@ -967,6 +967,8 @@ async def rewrite_story(project_id: str):
         "cost": COSTS["rewrite"],
         "quality_scores": scores,
         "llm_mode": guard.mode,
+        "llm_status": guard.status,
+        "llm_duration_ms": int((guard.meta or {}).get("duration_ms") or 0),
     }
 
 
@@ -1072,6 +1074,8 @@ async def improve_story(project_id: str, body: ImproveStoryRequest):
         "quality_scores": scores,
         "improvement": history_entry,
         "llm_mode": guard.mode,
+        "llm_status": guard.status,
+        "llm_duration_ms": int((guard.meta or {}).get("duration_ms") or 0),
     }
 
 
@@ -1085,6 +1089,8 @@ async def enhance_scene_prompt(scene_id: str, body: EnhanceSceneRequest):
 
     update: dict = {}
     llm_mode = "mock"
+    llm_status = "success"
+    llm_duration_ms = 0
     if body.kind == "image-prompt":
         update["raw_visual_prompt"] = scene.get("visual_prompt") or scene.get("raw_visual_prompt") or ""
         baseline = enhance_image_prompt(update["raw_visual_prompt"], scene)
@@ -1096,6 +1102,8 @@ async def enhance_scene_prompt(scene_id: str, body: EnhanceSceneRequest):
         guard = await execute_llm(prompt=prompt, project=proj, global_settings=global_settings,
                                   project_id=scene["project_id"], scene_id=scene_id)
         llm_mode = guard.mode
+        llm_status = guard.status
+        llm_duration_ms = int((guard.meta or {}).get("duration_ms") or 0)
         update["enhanced_image_prompt"] = (
             guard.output.get("text", "").strip()
             if guard.mode == "real" and guard.status == "success" and guard.output.get("text")
@@ -1112,6 +1120,8 @@ async def enhance_scene_prompt(scene_id: str, body: EnhanceSceneRequest):
         guard = await execute_llm(prompt=prompt, project=proj, global_settings=global_settings,
                                   project_id=scene["project_id"], scene_id=scene_id)
         llm_mode = guard.mode
+        llm_status = guard.status
+        llm_duration_ms = int((guard.meta or {}).get("duration_ms") or 0)
         update["enhanced_video_prompt"] = (
             guard.output.get("text", "").strip()
             if guard.mode == "real" and guard.status == "success" and guard.output.get("text")
@@ -1127,6 +1137,8 @@ async def enhance_scene_prompt(scene_id: str, body: EnhanceSceneRequest):
         guard = await execute_llm(prompt=prompt, project=proj, global_settings=global_settings,
                                   project_id=scene["project_id"], scene_id=scene_id)
         llm_mode = guard.mode
+        llm_status = guard.status
+        llm_duration_ms = int((guard.meta or {}).get("duration_ms") or 0)
         update.update(baseline)
         if guard.mode == "real" and guard.status == "success" and guard.output.get("text"):
             update["dialogue"] = guard.output["text"].strip()
@@ -1140,6 +1152,8 @@ async def enhance_scene_prompt(scene_id: str, body: EnhanceSceneRequest):
         guard = await execute_llm(prompt=prompt, project=proj, global_settings=global_settings,
                                   project_id=scene["project_id"], scene_id=scene_id)
         llm_mode = guard.mode
+        llm_status = guard.status
+        llm_duration_ms = int((guard.meta or {}).get("duration_ms") or 0)
         update.update(baseline)
         if guard.mode == "real" and guard.status == "success" and guard.output.get("text"):
             update["dialogue"] = guard.output["text"].strip()
@@ -1152,6 +1166,8 @@ async def enhance_scene_prompt(scene_id: str, body: EnhanceSceneRequest):
         "image_enhancement_hint": IMAGE_ENHANCEMENT_HINT,
         "video_enhancement_hint": VIDEO_ENHANCEMENT_HINT,
         "llm_mode": llm_mode,
+        "llm_status": llm_status,
+        "llm_duration_ms": llm_duration_ms,
     }
 
 
