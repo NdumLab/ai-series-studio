@@ -35,6 +35,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -754,6 +755,9 @@ function CharactersTab({ project, characters, voices, reload }) {
           <DialogContent className="bg-[#121212] border-white/10 text-white">
             <DialogHeader>
               <DialogTitle className="font-display">New character</DialogTitle>
+              <DialogDescription className="text-[#A1A1AA]">
+                Define a recurring cast member with voice and look.
+              </DialogDescription>
             </DialogHeader>
             <div className="space-y-3">
               <div>
