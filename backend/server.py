@@ -26,6 +26,16 @@ api = APIRouter(prefix="/api")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("episode-studio")
 
+# Phase 2A provider service layer (mock-only foundation).
+from providers import (  # noqa: E402  (kept after logger init)
+    MODALITIES as PROVIDER_LAYER_MODALITIES,
+    execute_provider,
+    provider_status,
+    resolve_provider,
+    resolve_voice_for_character,
+    run_modality_test,
+)
+
 # ---------------------------------------------------------------------------
 # Constants & mock asset pools
 # ---------------------------------------------------------------------------
@@ -464,6 +474,52 @@ async def get_feature_flags():
     return feature_flags()
 
 
+# ---------------------------------------------------------------------------
+# Phase 2A unified provider endpoints (foundation only — no real calls)
+# ---------------------------------------------------------------------------
+class UnifiedProviderTestRequest(BaseModel):
+    modality: Literal["llm", "image", "video", "voice", "music", "export"]
+    project_id: Optional[str] = None
+
+
+@api.post("/providers/test")
+async def providers_test(body: UnifiedProviderTestRequest):
+    """Dry-run for any modality. No real network call is ever made.
+
+    Returns the resolved provider, feature flag state, and key status so the
+    UI can clearly explain why a real call would (or would not) execute.
+    """
+    project = None
+    if body.project_id:
+        project = await db.projects.find_one({"id": body.project_id}, {"_id": 0})
+        if not project:
+            raise HTTPException(404, "Project not found")
+    global_settings = await _load_provider_settings()
+    return await run_modality_test(
+        modality=body.modality,
+        project=project,
+        global_settings=global_settings,
+    )
+
+
+@api.get("/providers/{modality}/status")
+async def providers_status_endpoint(modality: str, project_id: Optional[str] = None):
+    """Snapshot of resolved provider, feature flag and key for one modality."""
+    if modality not in PROVIDER_LAYER_MODALITIES:
+        raise HTTPException(400, f"Unknown modality: {modality}")
+    project = None
+    if project_id:
+        project = await db.projects.find_one({"id": project_id}, {"_id": 0})
+        if not project:
+            raise HTTPException(404, "Project not found")
+    global_settings = await _load_provider_settings()
+    return provider_status(
+        modality=modality,  # type: ignore[arg-type]
+        project=project,
+        global_settings=global_settings,
+    )
+
+
 @api.get("/config")
 async def get_studio_config():
     """Tunable thresholds (wallet credits, high-cost-scene threshold)."""
@@ -836,6 +892,15 @@ async def rewrite_story(project_id: str):
     proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
     if not proj:
         raise HTTPException(404, "Project not found")
+    # Provider execution guard — blocks real LLM call if a flag were on, runs mock otherwise.
+    global_settings = await _load_provider_settings()
+    guard = await execute_provider(
+        modality="llm",
+        project=proj,
+        global_settings=global_settings,
+        estimated_credits=COSTS["rewrite"],
+    )
+    log.info("provider.rewrite mode=%s status=%s provider=%s/%s", guard.mode, guard.status, guard.provider_name, guard.model_name)
     rewritten = mock_rewrite_story(proj.get("idea", ""))
     await db.projects.update_one(
         {"id": project_id},
@@ -961,6 +1026,16 @@ async def generate_image(scene_id: str):
     scene = await db.scenes.find_one({"id": scene_id}, {"_id": 0})
     if not scene:
         raise HTTPException(404, "Scene not found")
+    # Provider execution guard — verifies flag + key before any real call.
+    proj = await db.projects.find_one({"id": scene["project_id"]}, {"_id": 0})
+    global_settings = await _load_provider_settings()
+    guard = await execute_provider(
+        modality="image",
+        project=proj,
+        global_settings=global_settings,
+        estimated_credits=COSTS["image"],
+    )
+    log.info("provider.image mode=%s status=%s provider=%s/%s", guard.mode, guard.status, guard.provider_name, guard.model_name)
     # 5% mock failure to power admin failed jobs widget
     if random.random() < 0.05:
         await log_generation("image", scene["project_id"], 0, status="failed", error="mock provider timeout")
@@ -985,6 +1060,16 @@ async def _create_scene_segment(
     scene = await db.scenes.find_one({"id": scene_id}, {"_id": 0})
     if not scene:
         raise HTTPException(404, "Scene not found")
+    # Provider execution guard for video generation.
+    proj = await db.projects.find_one({"id": scene["project_id"]}, {"_id": 0})
+    global_settings = await _load_provider_settings()
+    guard = await execute_provider(
+        modality="video",
+        project=proj,
+        global_settings=global_settings,
+        estimated_credits=COSTS["video_segment"],
+    )
+    log.info("provider.video mode=%s status=%s provider=%s/%s", guard.mode, guard.status, guard.provider_name, guard.model_name)
     if random.random() < 0.05:
         await log_generation("video_segment", scene["project_id"], 0, status="failed", error="mock render failed")
         raise HTTPException(503, "Mock video render failed")

@@ -1,0 +1,45 @@
+{
+  "summary": "Phase 2A provider-layer foundation verified end-to-end. Backend pytest = 83/83 passing (15 new unit tests in test_provider_layer.py + 6 new e2e tests in backend_test.py + 62 prior). Curl smoke against public REACT_APP_BACKEND_URL confirms exact response shapes for the new endpoints. Frontend ProvidersTab renders the 6 new modality cards with data-testid eff-mode-<modality> ('Mock') and eff-key-status-<modality> ('not configured') with zero console errors. No real-network imports in /app/backend/providers/.",
+  "endpoint_verification": {
+    "POST /api/providers/test {modality:image}": "200 -> ok=true, mode=mock, status=skipped, feature_flag_enabled=false, key_present=false, key_status=not_configured, message contains 'no real provider call'. PASS",
+    "POST /api/providers/test {modality:image, project_id:<seeded>} with override on (image_provider=fal,image_model=flux-schnell)": "200 -> source=project, model=flux-schnell. PASS",
+    "POST /api/providers/test {modality:image, project_id:'missing-xxx'}": "404 {detail:'Project not found'}. PASS",
+    "GET /api/providers/{llm|image|video|voice|music|export}/status": "200 -> mode=mock, would_use_real_provider=false, feature_flag_enabled=false, key_present=false on all 6. PASS",
+    "GET /api/providers/foo/status": "400 {detail:'Unknown modality: foo'}. PASS",
+    "POST /api/projects/{id}/rewrite": "200 -> keys [rewritten_story, cost]. Shape unchanged. PASS",
+    "POST /api/scenes/{id}/generate-image": "200 -> keys [image_url, cost]. Shape unchanged. PASS",
+    "POST /api/scenes/{id}/segments": "200 -> full segment doc. Shape unchanged. PASS",
+    "POST /api/scenes/{id}/expand": "200 -> full segment doc with parent_segment_id. Shape unchanged. PASS"
+  },
+  "frontend_verification": {
+    "ProvidersTab effective-global view": "All 6 modality cards render. Visible rows: Provider, Model, Source, Mode='Mock', Key status='not configured'. data-testids eff-mode-llm/image/video/voice/music/export and eff-key-status-llm/image/video/voice/music/export all present.",
+    "Mock-mode banner": "Visible. All 6 USE_REAL_*_PROVIDER chips show OFF.",
+    "Console errors/warnings": "None observed during navigation Dashboard -> Project -> Providers tab.",
+    "Existing UI (cost badge, wallet ring, workflow stepper, tabs)": "Renders without regression."
+  },
+  "no_real_network_check": "grep -rnE 'import (requests|httpx|aiohttp|openai|anthropic)' /app/backend/providers/ -> CLEAN.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/test_provider_layer.py",
+    "/app/test_reports/pytest/iteration_3.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "executor.py cleanly enforces the Phase 2A invariant: even when USE_REAL_*_PROVIDER=true, the mock still runs because key_present() always returns False; status is then tagged 'blocked' with a transparent message. Good defensive design.",
+    "resolver.py priority order matches the spec (character -> project -> global -> hard-fallback); pure-function shape keeps unit tests trivial.",
+    "provider_status() and run_modality_test() share the same resolution path, so the dry-run endpoint cannot drift from real-execution metadata.",
+    "ProvidersTab.jsx EffectiveGlobalView additions are pure read-only rows; no state, no fetch, no input — zero regression surface.",
+    "PUT /api/projects/{id}/providers uses flat keys (image_provider, image_model). Worth a one-line API note for future agents — nested {image:{...}} payloads are silently ignored (Pydantic strips unknown fields).",
+    "Carry-over (non-blocking, from iter 2): DELETE /api/projects/{id} still does not cascade-delete segments whose scenes belong to the project. Not in scope for Phase 2A."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (83/83 pytest + 10/10 curl smoke)", "frontend": "100% (6/6 modality cards rendered correctly, 0 console errors)"},
+  "test_credentials": "Not required (single-user demo).",
+  "seed_data_creation": "Temporarily toggled provider_override_enabled=true with image_provider=fal,image_model=flux-schnell on seeded project 49560a92 to verify project-resolved source. Reset to override_enabled=false with cleared fields at end of run.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend pytest baseline is now 83 tests (cd /app/backend && python -m pytest tests/ -q ~17s). New provider layer lives at /app/backend/providers/ — pure-logic, no real network. The new endpoints are POST /api/providers/test and GET /api/providers/{modality}/status. To exercise project-override resolution via /providers/test, set flat keys on the project via PUT /api/projects/{id}/providers (NOT nested under modality). Frontend additions are read-only rows in ProjectStudio Providers tab; data-testids = eff-mode-<m> and eff-key-status-<m>. Phase 2B will swap the mock dispatch in executor.execute_provider() when flag_on AND key_present() both true — keys.py is the single seam to update.",
+  "rca of the issue": "No bugs found in this iteration. Phase 2A behaves exactly as specified."
+}

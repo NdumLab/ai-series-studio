@@ -308,6 +308,20 @@ function EffectiveGlobalView({ effective, onTest }) {
               <dd className="text-white text-right truncate">{eff.model || "—"}</dd>
               <dt className="text-[#A1A1AA]">Source</dt>
               <dd className="text-[#A1A1AA] text-right">{eff.source}</dd>
+              <dt className="text-[#A1A1AA]">Mode</dt>
+              <dd
+                className="text-right text-[#FFCC00]"
+                data-testid={`eff-mode-${sec.key}`}
+              >
+                Mock
+              </dd>
+              <dt className="text-[#A1A1AA]">Key status</dt>
+              <dd
+                className="text-right text-[#A1A1AA]"
+                data-testid={`eff-key-status-${sec.key}`}
+              >
+                not configured
+              </dd>
             </dl>
           </div>
         );

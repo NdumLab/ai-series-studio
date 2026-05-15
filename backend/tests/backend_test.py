@@ -1288,3 +1288,76 @@ def test_delete_unknown_project_is_safe(s):
     assert d["scenes"] == 0
     assert d["characters"] == 0
     assert d["segments"] == 0
+
+
+# ---------- Phase 2A unified provider endpoints ----------
+def test_unified_providers_test_returns_mock_response(s):
+    r = s.post(f"{API}/providers/test", json={"modality": "image"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is True
+    assert body["mode"] == "mock"
+    assert body["status"] == "skipped"
+    assert body["feature_flag_enabled"] is False
+    assert body["key_present"] is False
+    assert body["key_status"] == "not_configured"
+    assert "no real provider call" in body["message"].lower()
+
+
+def test_unified_providers_test_with_project_uses_resolved(s):
+    r = s.post(f"{API}/projects", json={"title": "ProvTest", "idea": "x"})
+    pid = r.json()["id"]
+    try:
+        # Override the project's image provider — the unified endpoint should
+        # report the project source after we enable override.
+        s.put(
+            f"{API}/projects/{pid}/providers",
+            json={
+                "provider_override_enabled": True,
+                "image_provider": "gemini-nano-banana",
+                "image_model": "nano-banana",
+            },
+        )
+        r2 = s.post(f"{API}/providers/test", json={"modality": "image", "project_id": pid})
+        body = r2.json()
+        assert body["provider"] == "gemini-nano-banana"
+        assert body["source"] == "project"
+        assert body["mode"] == "mock"
+    finally:
+        s.delete(f"{API}/projects/{pid}")
+
+
+def test_unified_providers_test_404_for_unknown_project(s):
+    r = s.post(f"{API}/providers/test", json={"modality": "video", "project_id": "missing-xxx"})
+    assert r.status_code == 404
+
+
+def test_provider_status_endpoint_global(s):
+    r = s.get(f"{API}/providers/voice/status")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["mode"] == "mock"
+    assert body["would_use_real_provider"] is False
+    assert body["feature_flag_enabled"] is False
+
+
+def test_provider_status_endpoint_rejects_unknown_modality(s):
+    r = s.get(f"{API}/providers/foo/status")
+    assert r.status_code == 400
+
+
+def test_existing_image_generation_still_works_with_guard(s, project_id):
+    """Smoke-check the existing /generate-image endpoint after the guard was wired in."""
+    proj = s.get(f"{API}/projects/{project_id}").json()
+    if not proj.get("scenes"):
+        # Make sure scenes exist (in case the fixture ordering changed)
+        s.post(f"{API}/projects/{project_id}/rewrite")
+        s.post(f"{API}/projects/{project_id}/split-scenes")
+        proj = s.get(f"{API}/projects/{project_id}").json()
+    scene_id = proj["scenes"][0]["id"]
+    r = _retry(lambda: s.post(f"{API}/scenes/{scene_id}/generate-image"))
+    assert r.status_code == 200
+    body = r.json()
+    assert "image_url" in body
+    assert body["cost"] == 2
+
