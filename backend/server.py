@@ -30,6 +30,7 @@ log = logging.getLogger("episode-studio")
 from providers import (  # noqa: E402  (kept after logger init)
     MODALITIES as PROVIDER_LAYER_MODALITIES,
     execute_provider,
+    execute_llm,
     provider_status,
     resolve_provider,
     resolve_voice_for_character,
@@ -932,15 +933,24 @@ async def rewrite_story(project_id: str):
         raise HTTPException(404, "Project not found")
     # Provider execution guard — blocks real LLM call if a flag were on, runs mock otherwise.
     global_settings = await _load_provider_settings()
-    guard = await execute_provider(
-        modality="llm",
+    mock_text = mock_rewrite_story(proj.get("idea", ""))
+    # Real LLM rewrite (LLM modality only). Falls back to mock on failure.
+    prompt = (
+        "Rewrite the following idea into a tight 1–3 minute episode draft. "
+        "Use vivid prose, a clear hook, escalating tension, and a memorable closing beat. "
+        "Reply with only the episode text — no headings.\n\n"
+        f"IDEA:\n{(proj.get('idea') or '').strip()}\n\n"
+        f"BASELINE_DRAFT (rewrite or improve, do not copy verbatim):\n{mock_text}"
+    )
+    guard = await execute_llm(
+        prompt=prompt,
         project=proj,
         global_settings=global_settings,
         estimated_credits=COSTS["rewrite"],
         project_id=project_id,
     )
     log.info("provider.rewrite mode=%s status=%s provider=%s/%s", guard.mode, guard.status, guard.provider_name, guard.model_name)
-    rewritten = mock_rewrite_story(proj.get("idea", ""))
+    rewritten = (guard.output.get("text") or "").strip() if guard.mode == "real" and guard.status == "success" else mock_text
     scores = compute_quality_scores(proj.get("idea", ""), rewritten)
     await db.projects.update_one(
         {"id": project_id},
@@ -952,7 +962,12 @@ async def rewrite_story(project_id: str):
         }},
     )
     await log_generation("rewrite", project_id, COSTS["rewrite"])
-    return {"rewritten_story": rewritten, "cost": COSTS["rewrite"], "quality_scores": scores}
+    return {
+        "rewritten_story": rewritten,
+        "cost": COSTS["rewrite"],
+        "quality_scores": scores,
+        "llm_mode": guard.mode,
+    }
 
 
 @api.post("/projects/{project_id}/split-scenes")
@@ -1015,13 +1030,31 @@ async def improve_story(project_id: str, body: ImproveStoryRequest):
         raise HTTPException(404, "Project not found")
     if not (proj.get("rewritten_story") or "").strip():
         raise HTTPException(400, "Story is empty — rewrite it first.")
-    new_story, note = apply_improvement(proj["rewritten_story"], body.kind)
+    mock_story, note = apply_improvement(proj["rewritten_story"], body.kind)
+    # Real LLM improvement (LLM modality only). Falls back to mock on failure.
+    global_settings = await _load_provider_settings()
+    prompt = (
+        f"Rewrite the following 1–3 minute episode so it becomes notably MORE {body.kind.replace('-', ' ')}.\n"
+        "Preserve the overall arc and any character names. Reply with only the rewritten episode — no headings.\n\n"
+        f"ORIGINAL:\n{proj['rewritten_story']}\n\n"
+        f"BASELINE_REWRITE (you may improve on this):\n{mock_story}"
+    )
+    guard = await execute_llm(
+        prompt=prompt,
+        project=proj,
+        global_settings=global_settings,
+        estimated_credits=COSTS["rewrite"],
+        project_id=project_id,
+    )
+    log.info("provider.improve mode=%s status=%s kind=%s", guard.mode, guard.status, body.kind)
+    new_story = (guard.output.get("text") or "").strip() if guard.mode == "real" and guard.status == "success" else mock_story
     scores = compute_quality_scores(proj.get("idea", ""), new_story)
     history_entry = {
         "id": new_id(),
         "kind": body.kind,
         "note": note,
         "at": now_iso(),
+        "llm_mode": guard.mode,
     }
     await db.projects.update_one(
         {"id": project_id},
@@ -1038,6 +1071,7 @@ async def improve_story(project_id: str, body: ImproveStoryRequest):
         "rewritten_story": new_story,
         "quality_scores": scores,
         "improvement": history_entry,
+        "llm_mode": guard.mode,
     }
 
 
@@ -1046,17 +1080,69 @@ async def enhance_scene_prompt(scene_id: str, body: EnhanceSceneRequest):
     scene = await db.scenes.find_one({"id": scene_id}, {"_id": 0})
     if not scene:
         raise HTTPException(404, "Scene not found")
+    global_settings = await _load_provider_settings()
+    proj = await db.projects.find_one({"id": scene["project_id"]}, {"_id": 0})
+
     update: dict = {}
+    llm_mode = "mock"
     if body.kind == "image-prompt":
         update["raw_visual_prompt"] = scene.get("visual_prompt") or scene.get("raw_visual_prompt") or ""
-        update["enhanced_image_prompt"] = enhance_image_prompt(update["raw_visual_prompt"], scene)
+        baseline = enhance_image_prompt(update["raw_visual_prompt"], scene)
+        prompt = (
+            "Rewrite this scene's image-generation prompt to maximize: realism, lighting, "
+            "character consistency, and camera framing. Reply with only the rewritten prompt.\n\n"
+            f"RAW:\n{update['raw_visual_prompt']}\n\nBASELINE_ENHANCEMENT:\n{baseline}"
+        )
+        guard = await execute_llm(prompt=prompt, project=proj, global_settings=global_settings,
+                                  project_id=scene["project_id"], scene_id=scene_id)
+        llm_mode = guard.mode
+        update["enhanced_image_prompt"] = (
+            guard.output.get("text", "").strip()
+            if guard.mode == "real" and guard.status == "success" and guard.output.get("text")
+            else baseline
+        )
     elif body.kind == "video-prompt":
         update["raw_visual_prompt"] = scene.get("visual_prompt") or scene.get("raw_visual_prompt") or ""
-        update["enhanced_video_prompt"] = enhance_video_prompt(update["raw_visual_prompt"], scene)
+        baseline = enhance_video_prompt(update["raw_visual_prompt"], scene)
+        prompt = (
+            "Rewrite this scene's video-generation prompt to maximize: motion, continuity, "
+            "emotion, and camera movement. Reply with only the rewritten prompt.\n\n"
+            f"RAW:\n{update['raw_visual_prompt']}\n\nBASELINE_ENHANCEMENT:\n{baseline}"
+        )
+        guard = await execute_llm(prompt=prompt, project=proj, global_settings=global_settings,
+                                  project_id=scene["project_id"], scene_id=scene_id)
+        llm_mode = guard.mode
+        update["enhanced_video_prompt"] = (
+            guard.output.get("text", "").strip()
+            if guard.mode == "real" and guard.status == "success" and guard.output.get("text")
+            else baseline
+        )
     elif body.kind == "scene-drama":
-        update.update(improve_scene_drama(scene))
+        baseline = improve_scene_drama(scene)
+        prompt = (
+            "Rewrite this scene's dialogue to be more dramatic. Two short, charged lines. "
+            "Reply with only the dialogue.\n\n"
+            f"CURRENT:\n{scene.get('dialogue') or ''}"
+        )
+        guard = await execute_llm(prompt=prompt, project=proj, global_settings=global_settings,
+                                  project_id=scene["project_id"], scene_id=scene_id)
+        llm_mode = guard.mode
+        update.update(baseline)
+        if guard.mode == "real" and guard.status == "success" and guard.output.get("text"):
+            update["dialogue"] = guard.output["text"].strip()
     elif body.kind == "dialogue":
-        update.update(improve_scene_dialogue(scene))
+        baseline = improve_scene_dialogue(scene)
+        prompt = (
+            "Rewrite this dialogue to feel more realistic — contractions, interruptions, "
+            "and natural rhythm. Reply with only the dialogue.\n\n"
+            f"CURRENT:\n{scene.get('dialogue') or ''}"
+        )
+        guard = await execute_llm(prompt=prompt, project=proj, global_settings=global_settings,
+                                  project_id=scene["project_id"], scene_id=scene_id)
+        llm_mode = guard.mode
+        update.update(baseline)
+        if guard.mode == "real" and guard.status == "success" and guard.output.get("text"):
+            update["dialogue"] = guard.output["text"].strip()
     update["updated_at"] = now_iso()
     await db.scenes.update_one({"id": scene_id}, {"$set": update})
     out = await db.scenes.find_one({"id": scene_id}, {"_id": 0})
@@ -1065,6 +1151,7 @@ async def enhance_scene_prompt(scene_id: str, body: EnhanceSceneRequest):
         "scene": out,
         "image_enhancement_hint": IMAGE_ENHANCEMENT_HINT,
         "video_enhancement_hint": VIDEO_ENHANCEMENT_HINT,
+        "llm_mode": llm_mode,
     }
 
 

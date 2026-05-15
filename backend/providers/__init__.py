@@ -25,6 +25,7 @@ from .base import (
 from .resolver import resolve_provider, resolve_voice_for_character
 from .executor import (
     execute_provider,
+    execute_llm,
     run_modality_test,
     provider_status,
     set_activity_recorder,
@@ -38,6 +39,7 @@ __all__ = [
     "resolve_provider",
     "resolve_voice_for_character",
     "execute_provider",
+    "execute_llm",
     "run_modality_test",
     "provider_status",
     "set_activity_recorder",

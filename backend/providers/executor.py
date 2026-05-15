@@ -2,12 +2,14 @@
 
 `execute_provider(...)` is the single entry point that resolves the configured
 provider, checks the feature flag + key, and then dispatches to either the
-real provider (Phase 2B+) or the corresponding mock.
+real provider (LLM modality only — Phase 2B) or the corresponding mock.
 
-Phase 2A guarantee: **No real network calls are ever made.** Even if a
-`USE_REAL_*_PROVIDER` flag is flipped to true, the executor refuses because
-no API key is configured (see `keys.key_present`). The result is always a
-clean `ProviderResult` with `mode="mock"` and a transparent `message`.
+Phase 2B guarantee:
+  - Only the **LLM** modality can ever take the real path.
+  - All other modalities are hard-pinned to mock — even if their feature flag
+    were flipped on, `keys.key_present_for_modality()` returns False so the
+    executor refuses the real path.
+  - Real LLM failures fall back to mock so the user workflow never breaks.
 """
 from __future__ import annotations
 
@@ -23,7 +25,7 @@ from .base import (
     STATUS_BLOCKED,
     STATUS_SKIPPED,
 )
-from .keys import key_present, key_status
+from .keys import key_present_for_modality, key_status
 from .mocks import MOCK_PROVIDER_BY_MODALITY
 from .resolver import resolve_provider, resolve_voice_for_character
 
@@ -94,7 +96,9 @@ def provider_status(
         global_settings=global_settings,
     )
     flag_on = _flag_enabled(modality)
-    has_key = key_present(resolved["provider"])
+    # Modality-aware: only LLM is allowed real, everything else is permanently
+    # pinned to mock-only in Phase 2B.
+    has_key = key_present_for_modality(modality, resolved["provider"])
     will_run_real = flag_on and has_key
     return {
         "modality": modality,
@@ -102,9 +106,10 @@ def provider_status(
         "model": resolved["model"],
         "source": resolved["source"],
         "feature_flag_enabled": flag_on,
-        "key_status": key_status(resolved["provider"]),
+        "key_status": key_status(resolved["provider"]) if modality == "llm" else "not_configured",
         "key_present": has_key,
         "would_use_real_provider": will_run_real,
+        "real_capable": modality == "llm",
         "mode": "real" if will_run_real else "mock",
     }
 
@@ -124,9 +129,10 @@ async def execute_provider(
 ) -> ProviderResult:
     """Resolve + run a provider call.
 
-    Phase 2A: real providers are NEVER executed. If the flag is on but the key
-    is missing, the executor still runs the mock and tags the result as
-    `status=blocked` so the caller can surface a clear message.
+    Phase 2B: only the **LLM** modality is allowed to take the real path, and
+    even then only when the flag is on AND `key_present_for_modality()` is
+    True. All other modalities always run the mock — this function is NOT
+    used to issue real image/video/voice/music/export calls.
     """
     if modality not in MODALITIES:
         raise ValueError(f"Unknown modality: {modality}")
@@ -138,16 +144,14 @@ async def execute_provider(
         global_settings=global_settings,
     )
     flag_on = _flag_enabled(modality)
-    has_key = key_present(resolved["provider"])
+    has_key = key_present_for_modality(modality, resolved["provider"])
     meta = {
         "resolved_source": resolved["source"],
         "feature_flag_enabled": flag_on,
         "key_present": has_key,
-        "key_status": key_status(resolved["provider"]),
+        "key_status": key_status(resolved["provider"]) if modality == "llm" else "not_configured",
     }
 
-    # Real path is blocked in Phase 2A regardless of flag, because no key store
-    # exists yet. We still run the mock so callers get a usable response.
     mock_cls = MOCK_PROVIDER_BY_MODALITY[modality]
     mock = mock_cls(
         provider_name=resolved["provider"], model_name=resolved["model"]
@@ -168,31 +172,152 @@ async def execute_provider(
         res.message = "Mock mode active — real provider call skipped."
     res.meta = meta
 
-    if _recorder is not None:
-        record = {
-            "modality": res.modality,
-            "provider_name": res.provider_name,
-            "model_name": res.model_name,
-            "source": resolved["source"],
-            "mode": res.mode,
-            "status": res.status,
-            "estimated_credits": res.estimated_credits,
-            "provider_job_id": res.provider_job_id,
-            "message": res.message,
-            "error": res.error,
-            "duration_ms": duration_ms,
-            "project_id": project_id,
-            "scene_id": scene_id,
-            "segment_id": segment_id,
-            "feature_flag_enabled": flag_on,
-            "key_present": has_key,
-        }
-        try:
-            await _recorder(record)
-        except Exception:  # pragma: no cover — never let recording break a call
-            pass
-
+    await _record(res, duration_ms, project_id, scene_id, segment_id)
     return res
+
+
+async def execute_llm(
+    *,
+    prompt: str,
+    system: Optional[str] = None,
+    project: Optional[Dict[str, Any]],
+    global_settings: Dict[str, Any],
+    estimated_credits: int = 0,
+    project_id: Optional[str] = None,
+    scene_id: Optional[str] = None,
+    segment_id: Optional[str] = None,
+) -> ProviderResult:
+    """Run an LLM call (real or mock) and return a ProviderResult.
+
+    Behavior:
+      - If `USE_REAL_LLM_PROVIDER=true` AND the Emergent key + integrations
+        library are available → call the real LLM. On success, the result
+        carries `mode="real"`, `output["text"]`, and a `provider_job_id`.
+      - On real failure (timeout / exception / blank output): a single
+        `status=failed` activity row is written, then the mock runs as a
+        fallback and a second activity row is written. The caller gets the
+        successful mock `ProviderResult` so the user workflow continues.
+      - When the flag is off or the key is missing, only the mock runs.
+    """
+    resolved = _resolve(
+        modality="llm",
+        project=project,
+        character=None,
+        global_settings=global_settings,
+    )
+    flag_on = _flag_enabled("llm")
+    has_key = key_present_for_modality("llm", resolved["provider"])
+    meta_base = {
+        "resolved_source": resolved["source"],
+        "feature_flag_enabled": flag_on,
+        "key_present": has_key,
+        "key_status": key_status(resolved["provider"]),
+    }
+
+    # Real path
+    if flag_on and has_key:
+        try:
+            from .llm_real import RealLLMProvider  # lazy import
+        except Exception:
+            RealLLMProvider = None  # type: ignore[assignment]
+        if RealLLMProvider is not None:
+            real = RealLLMProvider(
+                provider_name=resolved["provider"],
+                model_name=resolved["model"],
+            )
+            real_res = await real.run(prompt=prompt, system=system)
+            real_res.estimated_credits = estimated_credits
+            real_res.meta = {**meta_base, **real_res.meta}
+            await _record(
+                real_res,
+                int(real_res.meta.get("duration_ms") or 0),
+                project_id, scene_id, segment_id,
+            )
+            if real_res.status == STATUS_SUCCESS and (real_res.output.get("text") or "").strip():
+                return real_res
+            # Real failed → record the failure already happened above, now run mock.
+            return await _mock_llm(
+                resolved=resolved,
+                meta_base=meta_base,
+                estimated_credits=estimated_credits,
+                fallback_reason=real_res.error or "real provider returned no text",
+                project_id=project_id, scene_id=scene_id, segment_id=segment_id,
+            )
+
+    # Mock-only path (flag off OR key missing)
+    return await _mock_llm(
+        resolved=resolved,
+        meta_base=meta_base,
+        estimated_credits=estimated_credits,
+        fallback_reason=None,
+        blocked=flag_on and not has_key,
+        project_id=project_id, scene_id=scene_id, segment_id=segment_id,
+    )
+
+
+async def _mock_llm(
+    *,
+    resolved: Dict[str, str],
+    meta_base: Dict[str, Any],
+    estimated_credits: int,
+    fallback_reason: Optional[str],
+    blocked: bool = False,
+    project_id: Optional[str],
+    scene_id: Optional[str],
+    segment_id: Optional[str],
+) -> ProviderResult:
+    mock_cls = MOCK_PROVIDER_BY_MODALITY["llm"]
+    mock = mock_cls(provider_name=resolved["provider"], model_name=resolved["model"])
+    started = time.perf_counter()
+    res = await mock.run()
+    duration_ms = int((time.perf_counter() - started) * 1000)
+    res.estimated_credits = estimated_credits
+    res.mode = "mock"
+    if fallback_reason:
+        res.status = "fallback"
+        res.message = f"Real LLM unavailable — fell back to mock ({fallback_reason})."
+    elif blocked:
+        res.status = STATUS_BLOCKED
+        res.message = "Mock mode active — real LLM call skipped."
+    else:
+        res.status = STATUS_SUCCESS
+        res.message = "Mock mode active — real LLM call skipped."
+    res.meta = meta_base
+    await _record(res, duration_ms, project_id, scene_id, segment_id)
+    return res
+
+
+async def _record(
+    res: ProviderResult,
+    duration_ms: int,
+    project_id: Optional[str],
+    scene_id: Optional[str],
+    segment_id: Optional[str],
+) -> None:
+    if _recorder is None:
+        return
+    record = {
+        "modality": res.modality,
+        "provider_name": res.provider_name,
+        "model_name": res.model_name,
+        "source": (res.meta or {}).get("resolved_source", "global"),
+        "mode": res.mode,
+        "status": res.status,
+        "estimated_credits": res.estimated_credits,
+        "provider_job_id": res.provider_job_id,
+        "message": res.message,
+        "error": res.error,
+        "duration_ms": duration_ms,
+        "project_id": project_id,
+        "scene_id": scene_id,
+        "segment_id": segment_id,
+        "feature_flag_enabled": (res.meta or {}).get("feature_flag_enabled", False),
+        "key_present": (res.meta or {}).get("key_present", False),
+    }
+    try:
+        await _recorder(record)
+    except Exception:  # pragma: no cover
+        pass
 
 
 async def run_modality_test(

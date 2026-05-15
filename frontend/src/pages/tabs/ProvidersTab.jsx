@@ -108,6 +108,7 @@ export function ProvidersTab({ projectId, onChanged }) {
 
   return (
     <div className="space-y-4" data-testid="providers-tab">
+      <LLMModeBanner flags={data.feature_flags} />
       <div className="es-card p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div className="flex items-start gap-3">
           <SettingsIcon className="w-5 h-5 text-[#FF3B30] mt-0.5" />
@@ -222,6 +223,40 @@ export function ProvidersTab({ projectId, onChanged }) {
     </div>
   );
 }
+
+function LLMModeBanner({ flags }) {
+  const enabled = !!flags?.llm;
+  return (
+    <div
+      data-testid="llm-mode-banner"
+      data-active={enabled}
+      className={`es-card p-4 flex items-start gap-3 ${
+        enabled
+          ? "border-[#34C759]/40 bg-[#34C759]/5"
+          : "border-white/10 bg-white/[0.02]"
+      }`}
+    >
+      <PlugZap
+        className="w-5 h-5 mt-0.5 shrink-0"
+        style={{ color: enabled ? "#34C759" : "#A1A1AA" }}
+      />
+      <div className="flex-1">
+        <p
+          className="text-sm font-semibold"
+          style={{ color: enabled ? "#34C759" : "white" }}
+        >
+          {enabled ? "Real LLM enabled" : "Mock LLM active"}
+        </p>
+        <p className="text-xs text-[#A1A1AA] mt-1">
+          {enabled
+            ? "Story rewrite, improve-story, and prompt enhancements use the real LLM via the Emergent universal key. If the real call fails or times out, the mock fallback runs so workflows never break."
+            : "Story rewrite, improve-story, and prompt enhancements run through the deterministic mock. Image, video, voice, music, and export remain mock-only regardless."}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 
 function FlagsBanner({ flags }) {
   return (
@@ -434,6 +469,7 @@ function GuardStateRows({ modality, effective, variant = "global" }) {
           ? "Fallback mock"
           : "Global default";
   const tid = (suffix) => `${variant}-${suffix}-${modality}`;
+  const realCapable = modality === "llm";
   return (
     <dl
       data-testid={tid("guard-state")}
@@ -453,14 +489,15 @@ function GuardStateRows({ modality, effective, variant = "global" }) {
       </dd>
       <dt className="text-[#A1A1AA]">Key status</dt>
       <dd className="text-right text-[#A1A1AA]" data-testid={tid("key")}>
-        not configured
+        {realCapable ? "configured" : "not configured"}
       </dd>
       <dt className="text-[#A1A1AA]">Real call</dt>
       <dd
-        className="text-right text-[#34C759]"
+        className="text-right"
+        style={{ color: realCapable ? "#FFCC00" : "#34C759" }}
         data-testid={tid("real-call")}
       >
-        blocked · mock-only
+        {realCapable ? "real-capable · flag off" : "blocked · mock-only"}
       </dd>
     </dl>
   );

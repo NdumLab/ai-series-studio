@@ -485,3 +485,70 @@ Pure-logic, zero-network. Deterministic scoring + enhancement helpers:
 ### Hold
 Stopped before Phase 2B real-LLM wiring per user. The next milestone is the **Emergent universal LLM key → real LLM provider** wiring (LLM modality only).
 
+
+## Iteration 21 (2026-02) — Phase 2B: Real LLM provider (LLM modality only)
+**Goal**: ship the first real provider for AI Episode Studio. Strictly LLM-only. All other modalities remain permanently mock-pinned.
+
+### What's real now
+- `story rewrite`, `improve story`, `enhance scene prompt (image-prompt | video-prompt | scene-drama | dialogue)` can now call the **real LLM** via the Emergent universal LLM key when `USE_REAL_LLM_PROVIDER=true`. Default flag is `false`.
+- Default model: `openai/gpt-5.2` (configurable via `LLM_REAL_PROVIDER` / `LLM_REAL_MODEL` env, falls back to whatever's resolved in global/project settings).
+- Real call timeout: 25s (`DEFAULT_TIMEOUT_S`). On timeout / exception / empty output → deterministic mock fallback runs and a second activity row is logged with `status="fallback"`.
+- Verified live: a real `openai/gpt-5.2` call returned `mode=real, status=success, duration_ms=108300` end-to-end (then flag flipped back to `false`).
+
+### What's still locked
+- `USE_REAL_IMAGE_PROVIDER`, `USE_REAL_VIDEO_PROVIDER`, `USE_REAL_VOICE_PROVIDER`, `USE_REAL_MUSIC_PROVIDER`, `USE_REAL_EXPORT_PROVIDER` — all `false` AND hard-pinned to mock in code: `key_present_for_modality()` returns `False` for them unconditionally. Flipping the flag does nothing — the executor still runs the mock.
+- No API key input fields on the UI. No Stripe. No auth. No per-user API key storage.
+
+### Backend
+- **New** `/app/backend/providers/llm_real.py`:
+  - `RealLLMProvider(BaseProvider)` — `is_mock=False`, `requires_api_key=True`. `async run(prompt, system=None, max_tokens=600, timeout=25.0) → ProviderResult` using `emergentintegrations.llm.chat.LlmChat`. Captures `duration_ms` + `provider_job_id` (uuid4) + error message. Caps error text at 500 chars.
+  - `real_llm_available()` — True only when `EMERGENT_LLM_KEY` is set AND `emergentintegrations` is importable.
+- **Rewrote** `/app/backend/providers/keys.py`:
+  - `key_present_for_modality(modality, provider)` — returns True only for `"llm"`, gated by `real_llm_available()`. **Always False for every other modality.**
+  - `key_present(provider)` — legacy single-arg signature kept; treats provider as LLM-eligible only if its id is in `_LLM_PROVIDER_IDS = {openai, anthropic, gemini, mock-llm}`.
+- **Updated** `/app/backend/providers/executor.py`:
+  - `execute_provider()` now uses `key_present_for_modality()` (modality-aware) instead of provider-name-only `key_present()`. Image/video/voice/music/export always run mock — even with flag on, they end up with `status="blocked"` because `key_present=False`.
+  - **New** `execute_llm(prompt, system?, project, global_settings, ...)`. Dispatches to `RealLLMProvider` on flag+key, falls back to mock on failure. Writes one activity row for the real attempt + one for the mock fallback (when applicable). Records carry the `real`/`mock`/`fallback` status correctly.
+  - `provider_status()` now exposes `real_capable: bool` (True only for `llm`).
+- **Updated** `server.py`:
+  - `rewrite_story` — runs the deterministic mock baseline + calls `execute_llm(prompt=...)` with the idea + baseline. If real returns non-empty text → use it. Response now includes `llm_mode: "mock"|"real"|"fallback"`.
+  - `improve_story` — same pattern; the improvement-history entry now carries `llm_mode`.
+  - `enhance_scene_prompt` — same pattern for all 4 kinds (image-prompt / video-prompt / scene-drama / dialogue). Real LLM output replaces the deterministic baseline when available.
+- **New env keys** (in `/app/backend/.env`): `EMERGENT_LLM_KEY=sk-emergent-...`, `LLM_REAL_MODEL=gpt-5.2`, `LLM_REAL_PROVIDER=openai`. **All 6 USE_REAL_*_PROVIDER flags remain `false`.**
+
+### Frontend
+- **New** `LLMModeBanner` on the Providers tab (top of the page):
+  - When `feature_flags.llm = true` → green "Real LLM enabled" banner with explanation.
+  - Otherwise → grey "Mock LLM active" banner. Reminds the user that other modalities are mock-only regardless.
+- **Updated** `GuardStateRows`: for LLM specifically, the "Key status" row now reads `configured` and "Real call" reads `real-capable · flag off` (instead of the universal `blocked · mock-only` shown for other modalities).
+
+### Tests — **111/111 passing** (was 102, +9 Phase 2B + 1 renamed)
+**New file** `tests/test_phase2b_llm.py` (8 cases):
+- `test_real_llm_blocked_when_flag_off` — flag off → mock runs cleanly (status=success).
+- `test_real_llm_blocked_when_key_missing` — flag on, key removed → mock runs, status=blocked.
+- `test_real_llm_fallback_when_real_raises` — flag on, real LLM patched to return `status=failed` → caller receives mock-mode `ProviderResult` with `status="fallback"`; activity log contains both `"failed"` and `"fallback"` rows.
+- `test_non_llm_modalities_never_run_real_even_with_flag_on` (parametrized × 5: image/video/voice/music/export) — flag flipped on for each, `key_present` remains `False`, mock runs with `status="blocked"`, `provider_status.real_capable=False`.
+- `test_provider_status_llm_is_real_capable` — `real_capable=True` only for LLM.
+
+**Updated** existing assertions to reflect Phase 2B (LLM `key_present=True` is now allowed; non-LLM still must be `False`):
+- `_assert_record_is_safe` no longer enforces `mode=mock` globally; that invariant is asserted only inside the scoped test.
+- `test_provider_activity_remains_mock_when_flag_off_after_quality_work` (renamed) — scoped to rows owned by the test's `project_id` so legacy real-mode rows from other test runs / manual flag flips don't pollute it.
+
+### Hard guarantees (verified)
+- `grep -rn "emergentintegrations\|openai\.\|requests\.\|httpx\.|aiohttp" /app/backend/providers/ /app/backend/creative_quality.py /app/backend/server.py` → only matches inside `providers/llm_real.py` and `providers/keys.py` (the latter is a *lazy import* to ask `real_llm_available()`).
+- `creative_quality.py`, `server.py`, and all other modality endpoints contain **zero** real-network code.
+- Image / Video / Voice / Music / Export remain **mock-only by construction** — not by flag — because `key_present_for_modality()` returns False for them regardless of env.
+
+### Files changed (8)
+**Added** (2): `backend/providers/llm_real.py`, `backend/tests/test_phase2b_llm.py`
+**Modified** (5): `backend/providers/__init__.py` (export `execute_llm`), `backend/providers/keys.py` (rewritten — modality-aware), `backend/providers/executor.py` (modality-aware guard + `execute_llm` + `_record` helper + `real_capable`), `backend/server.py` (rewrite / improve / enhance now call `execute_llm`), `backend/tests/backend_test.py` (loosened `_assert_record_is_safe` + renamed/scoped one test)
+**Modified frontend** (1): `frontend/src/pages/tabs/ProvidersTab.jsx` (LLMModeBanner + LLM-aware GuardStateRows copy)
+**Env** (1): `backend/.env` — added `EMERGENT_LLM_KEY`, `LLM_REAL_MODEL=gpt-5.2`, `LLM_REAL_PROVIDER=openai`. All 6 `USE_REAL_*_PROVIDER` remain `false`.
+
+### Status checks
+- Backend pytest: **111/111**.
+- ESLint: clean.
+- Production build: OK (27.59s).
+- Real LLM end-to-end test: ✅ verified live (gpt-5.2 round-trip with `mode=real, status=success`).
+- Defensive grep: only `llm_real.py` carries real-network code; no other modality has any http imports.
+
