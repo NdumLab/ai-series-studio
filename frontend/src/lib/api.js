@@ -11,6 +11,7 @@ export const Projects = {
   get: (id) => api.get(`/projects/${id}`).then((r) => r.data),
   update: (id, payload) => api.put(`/projects/${id}`, payload).then((r) => r.data),
   remove: (id) => api.delete(`/projects/${id}`).then((r) => r.data),
+  restore: (id) => api.post(`/projects/${id}/restore`).then((r) => r.data),
   rewrite: (id) => api.post(`/projects/${id}/rewrite`).then((r) => r.data),
   splitScenes: (id) => api.post(`/projects/${id}/split-scenes`).then((r) => r.data),
   export: (id) => api.get(`/projects/${id}/export`).then((r) => r.data),

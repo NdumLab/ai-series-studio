@@ -1,0 +1,59 @@
+{
+  "summary": "Verified Safe-delete / Undo-delete (P1) end-to-end. Backend: full pytest passes 116/116 in ~25s including the 8 new soft-delete/restore/purge tests. Live-URL curl smoke validated exact response contracts: DELETE returns {ok,soft_deleted:true,project_id,deleted_at,delete_expires_at,previous_status}; GET 404 for soft-deleted (200 with ?include_deleted=true); list excludes soft-deleted; second DELETE is idempotent with already_deleted:true; POST /restore re-activates and clears flags; restore on unknown -> 404; delete on unknown -> {ok:true,soft_deleted:false,exists:false}; POST /admin/purge-deleted-projects returns purge counts and leaves non-expired soft-deleted + active untouched (0 purged when none expired). Frontend: trash button on hover triggers optimistic single-click delete (no confirm dialog), 'Deleted \"X\"' toast appears with Undo action; Undo restores within 5s with 'Restored \"X\"' toast and card reappears; letting 5s elapse + page refresh confirms the project remains hidden. Dashboard stats (Projects, In progress) recompute correctly on each transition: 3/2 -> 4/3 (create) -> 3/2 (delete) -> 4/3 (undo) -> 3/2 (delete+expire+refresh). Strict mock-mode banner still visible. Zero console errors during the flow.",
+  "endpoint_verification": {
+    "POST /api/projects": "200 -> new project created (PID=748ad361). PASS",
+    "DELETE /api/projects/{id} (1st)": "200 -> {ok:true, soft_deleted:true, deleted_at, delete_expires_at (+24h), previous_status:'draft'}. PASS",
+    "GET /api/projects/{id} after soft-delete": "404. PASS",
+    "GET /api/projects/{id}?include_deleted=true": "200. PASS",
+    "GET /api/projects": "soft-deleted excluded. PASS",
+    "DELETE /api/projects/{id} (2nd)": "200 -> already_deleted:true, idempotent. PASS",
+    "POST /api/projects/{id}/restore": "200 -> deleted_at:null, status restored to 'draft'. List re-includes. PASS",
+    "POST /api/projects/{nonexistent}/restore": "404. PASS",
+    "DELETE /api/projects/{nonexistent}": "200 -> {ok:true, soft_deleted:false, exists:false}. PASS",
+    "POST /api/admin/purge-deleted-projects": "200 -> {purged:{projects:0,scenes:0,characters:0,segments:0}} when nothing expired. PASS",
+    "pytest tests/ (116 tests)": "116 passed in 24.59s. PASS"
+  },
+  "frontend_verification": {
+    "Trash button (hover)": "data-testid=delete-project-btn-<id> hidden by opacity-0, revealed on group-hover, no AlertDialog opened on click. PASS",
+    "Optimistic delete": "Card immediately removed from grid without waiting for response. PASS",
+    "Delete toast": "'Deleted \"TEST_undo_flow_ABC\"' visible with Undo action button. PASS",
+    "Undo action": "Clicking Undo within 5s calls /restore, refetches /projects, card reappears, 'Restored \"X\"' toast shown. PASS",
+    "5s expiry": "After 6s wait + page reload, card stays hidden (no errors). PASS",
+    "Stats recomputation": "Projects/In-progress counters correctly transition 3/2 -> 4/3 -> 3/2 -> 4/3 -> 3/2. PASS",
+    "Mock-mode banner": "'MOCK MODE - NO REAL AI APIS CONNECTED YET' still visible. PASS",
+    "Console errors": "None during the flow."
+  },
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/iteration_5.xml",
+    "/tmp/smoke_softdelete.sh"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "_active_project_filter cleanly handles both missing and null deleted_at via $or — good defensive shape for the migration from hard-delete docs without that field.",
+    "delete_project's idempotency response includes already_deleted:true exactly as the spec requires; previous_status preserved across re-deletes (not overwritten).",
+    "restore_project unsets deleted_at, deleted_by, delete_expires_at, previous_status atomically and restores status from previous_status (default 'draft'). Correct.",
+    "admin_purge_deleted_projects cascades to scenes/characters/segments/provider_activity by project_id list — but provider_activity rows without a project_id (e.g. health checks) are correctly NOT swept. Good scoping.",
+    "update_project uses _active_project_filter so a PUT on a soft-deleted project correctly returns 404 — protects against accidental zombie writes. Good.",
+    "Carry-over from iter 4 (now resolved by design): segments cascade is now handled by purge path, since soft-delete intentionally keeps children intact for restore. The old 'no segment cascade' comment is no longer a bug.",
+    "Minor: the SOFT_DELETE_TTL_HOURS=24 constant lives at module scope — consider moving to env for ops tunability, but not required for MVP.",
+    "Frontend Dashboard.jsx onDelete uses sonner's toast() with action.label='Undo' and duration:5000 — matches spec; the action callback re-fetches Projects.list() so cost_summary stays fresh on restored card."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (116/116 pytest + 11/11 curl smoke)", "frontend": "100% (delete/undo/expire flows + stats all pass)"},
+  "test_credentials": "Not required (single-user demo).",
+  "seed_data_creation": "Created and cleaned up ephemeral TEST_softdel_* and TEST_undo_flow_ABC projects via API and UI. One TEST_undo_flow_ABC project was left soft-deleted in the preview env (its delete_expires_at is +24h, will be auto-purged by /admin/purge-deleted-projects after that). 3 seeded projects (ScoreCheck, TEST UI Project, Test Ep) remain active and untouched.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend pytest baseline is now 116 tests (`cd /app/backend && python -m pytest tests/ -q` ~25s). Soft-delete contract: DELETE returns {ok, soft_deleted, project_id, deleted_at, delete_expires_at, previous_status} or {ok:true, soft_deleted:false, exists:false} on unknown, or {…, already_deleted:true} on re-delete. GET 404 for soft-deleted unless ?include_deleted=true. POST /api/projects/{id}/restore brings it back (404 if id doesn't exist anywhere). POST /api/admin/purge-deleted-projects purges only rows whose delete_expires_at <= now. Frontend Dashboard now uses sonner toast.action.label='Undo' on a 5s timer — testids: delete-project-btn-<id>, project-delete-toast, project-restore-toast. Trash btn is hover-revealed (opacity-0 -> 100); use force=True on click and hover the card first. Strict mock mode still enforced; provider invariant from iter 4 still holds.",
+  "rca of the issue": "No bugs found in this iteration. Feature works exactly per spec: soft-delete + 24h purge window + 5s optimistic undo with fresh re-fetch on restore, and stats recomputation is purely client-side from the projects array so it follows transitions correctly."
+}

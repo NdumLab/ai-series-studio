@@ -1203,9 +1203,9 @@ def test_existing_expand_and_costs_still_work_after_reorder(s):
 
 
 
-# ---------- Cascade delete ----------
+# ---------- Soft delete + restore + purge ----------
 def _seed_full_project(s, title):
-    """Create a project with scenes, characters, and segments. Returns (pid, ids)."""
+    """Create a project with scenes, characters, and segments. Returns pid."""
     r = s.post(f"{API}/projects", json={"title": title, "idea": "A small experiment for cascade testing"})
     pid = r.json()["id"]
     # rewrite + split → 6 scenes
@@ -1225,70 +1225,159 @@ def _seed_full_project(s, title):
     return pid
 
 
-def test_delete_project_cascades_scenes_characters_segments(s):
-    pid = _seed_full_project(s, "TEST_CASCADE")
-
-    r = s.delete(f"{API}/projects/{pid}")
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["ok"] is True
-    d = body["deleted"]
-    assert d["projects"] == 1
-    assert d["scenes"] == 6
-    assert d["characters"] == 2
-    assert d["segments"] == 2
-
-    # Project gone
-    assert s.get(f"{API}/projects/{pid}").status_code == 404
-    # No scenes / segments / characters can be discovered via downstream endpoints
-    # (export should also fail since the project no longer exists)
-    assert s.get(f"{API}/projects/{pid}/export").status_code == 404
+def _hard_purge_via_mongo(pid):
+    """Test cleanup: force-purge a single project bypassing the 24h window."""
+    dbh = _direct_db()
+    dbh.projects.delete_one({"id": pid})
+    dbh.scenes.delete_many({"project_id": pid})
+    dbh.characters.delete_many({"project_id": pid})
+    dbh.segments.delete_many({"project_id": pid})
 
 
-def test_delete_project_does_not_touch_other_projects(s):
-    pid_a = _seed_full_project(s, "TEST_CASCADE_A")
-    pid_b = _seed_full_project(s, "TEST_CASCADE_B")
-
+def test_delete_project_is_soft_delete(s):
+    pid = _seed_full_project(s, "TEST_SOFT_DELETE")
     try:
-        # Sanity: B has its scenes and characters before delete of A
-        before_b = s.get(f"{API}/projects/{pid_b}").json()
-        assert len(before_b["scenes"]) == 6
-        assert len(before_b["characters"]) == 2
-        seg_id_b = before_b["scenes"][0]["segments"][0]["id"] if before_b["scenes"][0].get("segments") else None
-
-        # Delete A
-        r = s.delete(f"{API}/projects/{pid_a}")
-        assert r.status_code == 200
-        d = r.json()["deleted"]
-        assert d["projects"] == 1 and d["scenes"] == 6 and d["characters"] == 2 and d["segments"] == 2
-
-        # B is fully intact
-        after_b = s.get(f"{API}/projects/{pid_b}").json()
-        assert len(after_b["scenes"]) == 6
-        assert len(after_b["characters"]) == 2
-        # The segment that existed on B before is still listed under its scene
-        scenes_with_segs = [sc for sc in after_b["scenes"] if sc.get("segments")]
-        assert scenes_with_segs, "Project B's segments should not be affected by deleting Project A"
-        if seg_id_b:
-            still_there = any(
-                seg["id"] == seg_id_b for sc in after_b["scenes"] for seg in sc.get("segments", [])
-            )
-            assert still_there
+        r = s.delete(f"{API}/projects/{pid}")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["ok"] is True
+        assert body["soft_deleted"] is True
+        assert body["project_id"] == pid
+        assert body["deleted_at"]
+        assert body["delete_expires_at"] > body["deleted_at"]
+        # Soft-deleted projects vanish from list + get returns 404
+        listing = s.get(f"{API}/projects").json()
+        assert all(p["id"] != pid for p in listing)
+        assert s.get(f"{API}/projects/{pid}").status_code == 404
+        # Child data still exists in Mongo (will be removed by purge later)
+        dbh = _direct_db()
+        assert dbh.scenes.count_documents({"project_id": pid}) == 6
+        assert dbh.characters.count_documents({"project_id": pid}) == 2
+        assert dbh.segments.count_documents({"project_id": pid}) == 2
     finally:
-        s.delete(f"{API}/projects/{pid_b}")
+        _hard_purge_via_mongo(pid)
+
+
+def test_restore_project_brings_it_back(s):
+    pid = _seed_full_project(s, "TEST_RESTORE")
+    try:
+        s.delete(f"{API}/projects/{pid}")
+        assert s.get(f"{API}/projects/{pid}").status_code == 404
+        r = s.post(f"{API}/projects/{pid}/restore")
+        assert r.status_code == 200, r.text
+        restored = r.json()
+        assert restored["id"] == pid
+        assert restored["status"] in ("draft", "story_ready", "scenes_ready")
+        assert "deleted_at" not in restored
+        # Re-appears on the listing and GET
+        listing = s.get(f"{API}/projects").json()
+        assert any(p["id"] == pid for p in listing)
+        assert s.get(f"{API}/projects/{pid}").status_code == 200
+    finally:
+        _hard_purge_via_mongo(pid)
+
+
+def test_restore_unknown_project_returns_404(s):
+    r = s.post(f"{API}/projects/does-not-exist-xxxx/restore")
+    assert r.status_code == 404
 
 
 def test_delete_unknown_project_is_safe(s):
     r = s.delete(f"{API}/projects/does-not-exist-xxxx")
-    # API convention for missing DELETEs is a 200 ok-response with zero counts
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["ok"] is True
-    d = body["deleted"]
-    assert d["projects"] == 0
-    assert d["scenes"] == 0
-    assert d["characters"] == 0
-    assert d["segments"] == 0
+    assert body["soft_deleted"] is False
+    assert body["exists"] is False
+
+
+def test_delete_does_not_touch_other_projects(s):
+    pid_a = _seed_full_project(s, "TEST_SOFT_A")
+    pid_b = _seed_full_project(s, "TEST_SOFT_B")
+    try:
+        s.delete(f"{API}/projects/{pid_a}")
+        # B is fully intact (visible + child data still queryable)
+        after_b = s.get(f"{API}/projects/{pid_b}").json()
+        assert len(after_b["scenes"]) == 6
+        assert len(after_b["characters"]) == 2
+        scenes_with_segs = [sc for sc in after_b["scenes"] if sc.get("segments")]
+        assert scenes_with_segs
+    finally:
+        _hard_purge_via_mongo(pid_a)
+        s.delete(f"{API}/projects/{pid_b}")
+        _hard_purge_via_mongo(pid_b)
+
+
+def test_purge_removes_expired_projects_and_their_children(s):
+    pid = _seed_full_project(s, "TEST_PURGE_EXPIRED")
+    try:
+        s.delete(f"{API}/projects/{pid}")
+        # Force-expire via Mongo
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        dbh = _direct_db()
+        past_iso = (_dt.now(_tz.utc) - _td(hours=1)).isoformat()
+        dbh.projects.update_one({"id": pid}, {"$set": {"delete_expires_at": past_iso}})
+        r = s.post(f"{API}/admin/purge-deleted-projects")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["ok"] is True
+        # Our project should be in the purged counts (other expired projects may
+        # exist from other test runs — assert at least our contribution).
+        assert body["purged"]["projects"] >= 1
+        assert body["purged"]["scenes"] >= 6
+        assert body["purged"]["characters"] >= 2
+        assert body["purged"]["segments"] >= 2
+        # Hard-gone everywhere
+        dbh = _direct_db()
+        assert dbh.projects.count_documents({"id": pid}) == 0
+        assert dbh.scenes.count_documents({"project_id": pid}) == 0
+        assert dbh.characters.count_documents({"project_id": pid}) == 0
+        assert dbh.segments.count_documents({"project_id": pid}) == 0
+    finally:
+        _hard_purge_via_mongo(pid)
+
+
+def test_purge_does_not_touch_active_or_non_expired_projects(s):
+    active_pid = _seed_full_project(s, "TEST_PURGE_ACTIVE")
+    soft_pid = _seed_full_project(s, "TEST_PURGE_SOFT_NOT_EXPIRED")
+    try:
+        s.delete(f"{API}/projects/{soft_pid}")  # delete_expires_at is +24h
+        r = s.post(f"{API}/admin/purge-deleted-projects")
+        assert r.status_code == 200, r.text
+        # Neither project we just made should have been purged.
+        dbh = _direct_db()
+        assert dbh.projects.count_documents({"id": active_pid}) == 1
+        assert dbh.projects.count_documents({"id": soft_pid}) == 1
+        assert dbh.scenes.count_documents({"project_id": active_pid}) == 6
+        assert dbh.scenes.count_documents({"project_id": soft_pid}) == 6
+        # Active project must still be reachable via API
+        assert s.get(f"{API}/projects/{active_pid}").status_code == 200
+        # Soft-deleted one must still be hidden (still within window)
+        assert s.get(f"{API}/projects/{soft_pid}").status_code == 404
+    finally:
+        _hard_purge_via_mongo(active_pid)
+        _hard_purge_via_mongo(soft_pid)
+
+
+def test_delete_then_restore_is_idempotent(s):
+    pid = _seed_full_project(s, "TEST_SOFT_IDEMPOTENT")
+    try:
+        first = s.delete(f"{API}/projects/{pid}").json()
+        second = s.delete(f"{API}/projects/{pid}").json()
+        assert first["soft_deleted"] is True
+        assert second["soft_deleted"] is True
+        assert second.get("already_deleted") is True
+        # Restore once
+        r = s.post(f"{API}/projects/{pid}/restore")
+        assert r.status_code == 200
+        # Restoring an active project is a no-op (returns project, not 404)
+        r2 = s.post(f"{API}/projects/{pid}/restore")
+        assert r2.status_code == 200
+        body2 = r2.json()
+        assert body2["id"] == pid
+        assert "deleted_at" not in body2
+    finally:
+        _hard_purge_via_mongo(pid)
 
 
 # ---------- Phase 2A unified provider endpoints ----------

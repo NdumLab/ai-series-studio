@@ -875,18 +875,35 @@ async def _project_cost_summary(project_id: str, cfg: dict) -> dict:
     }
 
 
+# Soft-delete helpers
+SOFT_DELETE_TTL_HOURS = 24
+
+
+def _active_project_filter(extra: Optional[dict] = None) -> dict:
+    """Mongo filter that hides soft-deleted projects."""
+    f: dict = {"$or": [{"deleted_at": {"$exists": False}}, {"deleted_at": None}]}
+    if extra:
+        return {"$and": [extra, f]}
+    return f
+
+
 @api.get("/projects")
 async def list_projects():
     cfg = studio_config()
-    projects = await db.projects.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    projects = await db.projects.find(
+        _active_project_filter(), {"_id": 0}
+    ).sort("created_at", -1).to_list(500)
     for p in projects:
         p["cost_summary"] = await _project_cost_summary(p["id"], cfg)
     return projects
 
 
 @api.get("/projects/{project_id}")
-async def get_project(project_id: str):
-    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
+async def get_project(project_id: str, include_deleted: bool = False):
+    query: dict = {"id": project_id}
+    if not include_deleted:
+        query = _active_project_filter({"id": project_id})
+    proj = await db.projects.find_one(query, {"_id": 0})
     if not proj:
         raise HTTPException(404, "Project not found")
     scenes = await db.scenes.find({"project_id": project_id}, {"_id": 0}).sort("order", 1).to_list(500)
@@ -903,7 +920,9 @@ async def update_project(project_id: str, body: ProjectUpdate):
     if not update:
         raise HTTPException(400, "No fields to update")
     update["updated_at"] = now_iso()
-    res = await db.projects.update_one({"id": project_id}, {"$set": update})
+    res = await db.projects.update_one(
+        _active_project_filter({"id": project_id}), {"$set": update}
+    )
     if res.matched_count == 0:
         raise HTTPException(404, "Project not found")
     return await db.projects.find_one({"id": project_id}, {"_id": 0})
@@ -911,19 +930,81 @@ async def update_project(project_id: str, body: ProjectUpdate):
 
 @api.delete("/projects/{project_id}")
 async def delete_project(project_id: str):
-    proj_res = await db.projects.delete_one({"id": project_id})
-    scenes_res = await db.scenes.delete_many({"project_id": project_id})
-    chars_res = await db.characters.delete_many({"project_id": project_id})
-    segs_res = await db.segments.delete_many({"project_id": project_id})
+    """Soft-delete a project.
+
+    Sets deleted_at + delete_expires_at (now + 24h) and stashes the prior status
+    in `previous_status` so restore can return the project to where it was.
+    Child scenes/characters/segments are NOT touched yet — they're cleaned up by
+    the purge endpoint after `delete_expires_at` passes.
+    """
+    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    if not proj:
+        return {
+            "ok": True,
+            "soft_deleted": False,
+            "project_id": project_id,
+            "exists": False,
+        }
+    if proj.get("deleted_at"):
+        # Already soft-deleted — idempotent.
+        return {
+            "ok": True,
+            "soft_deleted": True,
+            "project_id": project_id,
+            "deleted_at": proj["deleted_at"],
+            "delete_expires_at": proj.get("delete_expires_at"),
+            "already_deleted": True,
+        }
+    now = datetime.now(timezone.utc)
+    deleted_at = now.isoformat()
+    expires_at = (now + timedelta(hours=SOFT_DELETE_TTL_HOURS)).isoformat()
+    previous_status = proj.get("status") or "draft"
+    await db.projects.update_one(
+        {"id": project_id},
+        {"$set": {
+            "deleted_at": deleted_at,
+            "deleted_by": DEFAULT_USER_ID,
+            "delete_expires_at": expires_at,
+            "previous_status": previous_status,
+            "status": "deleted",
+            "updated_at": deleted_at,
+        }},
+    )
     return {
         "ok": True,
-        "deleted": {
-            "projects": proj_res.deleted_count,
-            "scenes": scenes_res.deleted_count,
-            "characters": chars_res.deleted_count,
-            "segments": segs_res.deleted_count,
-        },
+        "soft_deleted": True,
+        "project_id": project_id,
+        "deleted_at": deleted_at,
+        "delete_expires_at": expires_at,
+        "previous_status": previous_status,
     }
+
+
+@api.post("/projects/{project_id}/restore")
+async def restore_project(project_id: str):
+    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    if not proj.get("deleted_at"):
+        # Not soft-deleted — return as-is, no-op.
+        return proj
+    restore_status = proj.get("previous_status") or "draft"
+    await db.projects.update_one(
+        {"id": project_id},
+        {
+            "$set": {
+                "status": restore_status,
+                "updated_at": now_iso(),
+            },
+            "$unset": {
+                "deleted_at": "",
+                "deleted_by": "",
+                "delete_expires_at": "",
+                "previous_status": "",
+            },
+        },
+    )
+    return await db.projects.find_one({"id": project_id}, {"_id": 0})
 
 
 @api.post("/projects/{project_id}/rewrite")
@@ -1621,6 +1702,41 @@ async def admin_generations():
 @api.get("/admin/failed-jobs")
 async def admin_failed_jobs():
     return await db.generations.find({"status": "failed"}, {"_id": 0}).sort("created_at", -1).to_list(200)
+
+
+@api.post("/admin/purge-deleted-projects")
+async def admin_purge_deleted_projects():
+    """Permanently remove soft-deleted projects whose delete_expires_at has passed.
+
+    Cascade-deletes the project + its scenes + characters + segments.
+    Provider activity rows scoped to those project_ids are also dropped.
+    """
+    now_iso_str = datetime.now(timezone.utc).isoformat()
+    expired = await db.projects.find(
+        {"deleted_at": {"$ne": None}, "delete_expires_at": {"$lte": now_iso_str}},
+        {"_id": 0, "id": 1},
+    ).to_list(1000)
+    project_ids = [p["id"] for p in expired]
+    if not project_ids:
+        return {
+            "ok": True,
+            "purged": {"projects": 0, "scenes": 0, "characters": 0, "segments": 0},
+        }
+    proj_res = await db.projects.delete_many({"id": {"$in": project_ids}})
+    scenes_res = await db.scenes.delete_many({"project_id": {"$in": project_ids}})
+    chars_res = await db.characters.delete_many({"project_id": {"$in": project_ids}})
+    segs_res = await db.segments.delete_many({"project_id": {"$in": project_ids}})
+    # Safe-metadata-only provider activity for these projects too.
+    await db.provider_activity.delete_many({"project_id": {"$in": project_ids}})
+    return {
+        "ok": True,
+        "purged": {
+            "projects": proj_res.deleted_count,
+            "scenes": scenes_res.deleted_count,
+            "characters": chars_res.deleted_count,
+            "segments": segs_res.deleted_count,
+        },
+    }
 
 
 @api.get("/admin/provider-activity")

@@ -11,16 +11,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "../components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "../components/ui/alert-dialog";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
 import { Button } from "../components/ui/button";
@@ -131,34 +121,38 @@ export default function Dashboard() {
   };
 
   const onDelete = async (project) => {
-    // Optimistically remove from list; restore on failure.
+    // Optimistically remove from list; restore on failure or undo.
     const prev = projects;
     setProjects((list) => list.filter((p) => p.id !== project.id));
     try {
-      const res = await Projects.remove(project.id);
-      const d = res?.deleted || {};
-      const projectsCount = d.projects ?? 0;
-      const scenes = d.scenes ?? 0;
-      const chars = d.characters ?? 0;
-      const segments = d.segments ?? 0;
-      if (projectsCount === 0 && scenes === 0 && chars === 0 && segments === 0) {
-        toast("Project already removed or not found.", {
-          id: `del-${project.id}`,
-        });
-        return;
-      }
-      // Include characters only when the message stays clean (i.e. > 0).
-      const parts = [`${scenes} scene${scenes === 1 ? "" : "s"}`];
-      if (chars > 0) parts.push(`${chars} character${chars === 1 ? "" : "s"}`);
-      parts.push(`${segments} segment${segments === 1 ? "" : "s"} removed`);
-      toast.success(`Deleted "${project.title}" · ${parts.join(" · ")}`, {
-        id: `del-${project.id}`,
-        "data-testid": "project-delete-toast",
-      });
+      await Projects.remove(project.id);
     } catch {
       setProjects(prev);
       toast.error("Delete failed");
+      return;
     }
+    toast(`Deleted "${project.title}"`, {
+      id: `del-${project.id}`,
+      duration: 5000,
+      "data-testid": "project-delete-toast",
+      action: {
+        label: "Undo",
+        onClick: async () => {
+          try {
+            const restored = await Projects.restore(project.id);
+            // Re-fetch list so cost_summary etc. comes back fresh.
+            const fresh = await Projects.list();
+            setProjects(fresh);
+            toast.success(`Restored "${restored.title || project.title}"`, {
+              id: `restore-${project.id}`,
+              "data-testid": "project-restore-toast",
+            });
+          } catch {
+            toast.error("Restore failed");
+          }
+        },
+      },
+    });
   };
 
   return (
@@ -306,7 +300,6 @@ export default function Dashboard() {
 }
 
 function ProjectCard({ project, onDelete }) {
-  const [confirmOpen, setConfirmOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   return (
     <div className="relative group">
@@ -339,56 +332,23 @@ function ProjectCard({ project, onDelete }) {
 
       <button
         type="button"
-        onClick={(e) => {
+        disabled={busy}
+        onClick={async (e) => {
           e.preventDefault();
           e.stopPropagation();
-          setConfirmOpen(true);
+          setBusy(true);
+          try {
+            await onDelete(project);
+          } finally {
+            setBusy(false);
+          }
         }}
         data-testid={`delete-project-btn-${project.id}`}
-        title="Delete project"
+        title="Delete project (undo available for 5 seconds)"
         className="absolute top-3 right-12 p-1.5 rounded-md text-[#A1A1AA] opacity-0 group-hover:opacity-100 hover:text-[#FF3B30] hover:bg-white/5 transition-opacity"
       >
         <Trash2 className="w-3.5 h-3.5" />
       </button>
-
-      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <AlertDialogContent
-          className="bg-[#121212] border-white/10 text-white"
-          data-testid={`delete-project-dialog-${project.id}`}
-        >
-          <AlertDialogHeader>
-            <AlertDialogTitle className="font-display">
-              Delete &quot;{project.title}&quot;?
-            </AlertDialogTitle>
-            <AlertDialogDescription className="text-[#A1A1AA]">
-              This permanently removes the project, its scenes, characters, and video
-              segments. This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel
-              data-testid={`delete-project-cancel-${project.id}`}
-              className="border-white/15 bg-transparent text-white hover:bg-white/10 hover:text-white"
-            >
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              disabled={busy}
-              onClick={async (e) => {
-                e.preventDefault();
-                setBusy(true);
-                await onDelete(project);
-                setBusy(false);
-                setConfirmOpen(false);
-              }}
-              data-testid={`delete-project-confirm-${project.id}`}
-              className="bg-[#FF3B30] hover:bg-[#FF453A] text-white"
-            >
-              {busy ? "Deleting…" : "Delete"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }
