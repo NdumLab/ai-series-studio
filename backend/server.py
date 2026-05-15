@@ -590,6 +590,61 @@ async def project_voice_resolution(project_id: str):
     }
 
 
+@api.get("/projects/{project_id}/scene-costs")
+async def project_scene_costs(project_id: str):
+    """Per-scene credit estimate using the mock COSTS map.
+
+    Formula: image + (video_segment * max(1, len(segments))) + voice
+    Missing keys degrade gracefully (treated as 0) and the response flags
+    `estimate_unavailable=True` for that scene if any unit cost is missing.
+    """
+    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+
+    image_cost = COSTS.get("image")
+    seg_cost = COSTS.get("video_segment")
+    voice_cost = COSTS.get("voice")
+
+    scenes = await db.scenes.find({"project_id": project_id}, {"_id": 0}).sort("order", 1).to_list(500)
+    out = []
+    grand_total = 0
+    for sc in scenes:
+        seg_count = await db.segments.count_documents({"scene_id": sc["id"]})
+        planned_segments = max(1, seg_count)
+        missing = []
+        if image_cost is None:
+            missing.append("image")
+        if seg_cost is None:
+            missing.append("video_segment")
+        if voice_cost is None:
+            missing.append("voice")
+        breakdown = {
+            "image": (image_cost or 0),
+            "video": (seg_cost or 0) * planned_segments,
+            "voice": (voice_cost or 0),
+        }
+        total = breakdown["image"] + breakdown["video"] + breakdown["voice"]
+        grand_total += total
+        out.append({
+            "scene_id": sc["id"],
+            "title": sc.get("title"),
+            "segments_count": seg_count,
+            "planned_segments": planned_segments,
+            "breakdown": breakdown,
+            "total_credits": total,
+            "estimate_unavailable": bool(missing),
+            "missing_costs": missing,
+        })
+    return {
+        "project_id": project_id,
+        "mock_mode": True,
+        "unit_costs": {"image": image_cost, "video_segment": seg_cost, "voice": voice_cost},
+        "grand_total_credits": grand_total,
+        "scenes": out,
+    }
+
+
 
 
 # ---------------------------------------------------------------------------

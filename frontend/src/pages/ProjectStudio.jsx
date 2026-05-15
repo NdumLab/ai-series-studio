@@ -173,7 +173,8 @@ export default function ProjectStudio() {
             scenes={scenes}
             characters={characters}
             options={options}
-            reload={load}
+            voiceResolution={voiceRes}
+            reload={reloadAll}
           />
         </TabsContent>
         <TabsContent value="characters" className="mt-6">
@@ -424,7 +425,7 @@ function StoryTab({ project, providers, options, reload, onContinue }) {
 // ---------------------------------------------------------------------------
 // Scenes tab — text/structure editing only (no media generation here)
 // ---------------------------------------------------------------------------
-function ScenesTab({ project, scenes, characters, options, reload }) {
+function ScenesTab({ project, scenes, characters, options, voiceResolution, reload }) {
   if (!scenes.length) {
     return (
       <div className="es-card p-12 text-center">
@@ -447,6 +448,7 @@ function ScenesTab({ project, scenes, characters, options, reload }) {
           scene={s}
           characters={characters}
           options={options}
+          voiceResolution={voiceResolution}
           reload={reload}
         />
       ))}
@@ -479,7 +481,7 @@ function AddSceneButton({ projectId, reload }) {
   );
 }
 
-function SceneEditor({ index, scene, characters, options, reload }) {
+function SceneEditor({ index, scene, characters, options, voiceResolution, reload }) {
   const [local, setLocal] = useState(scene);
   useEffect(() => setLocal(scene), [scene]);
   const patch = (k, v) => setLocal((p) => ({ ...p, [k]: v }));
@@ -492,9 +494,30 @@ function SceneEditor({ index, scene, characters, options, reload }) {
     reload();
   };
 
+  // Per-scene credit estimate from options.costs (mock).
+  const costs = options?.costs || {};
+  const segmentsCount = (scene.segments || []).length;
+  const planned = Math.max(1, segmentsCount);
+  const imageC = costs.image;
+  const videoC = costs.video_segment;
+  const voiceC = costs.voice;
+  const missing = [imageC, videoC, voiceC].some((v) => v == null);
+  const breakdown = {
+    image: imageC || 0,
+    video: (videoC || 0) * planned,
+    voice: voiceC || 0,
+  };
+  const sceneTotal = breakdown.image + breakdown.video + breakdown.voice;
+  const breakdownTooltip = `Image: ${breakdown.image} · Video: ${breakdown.video} · Voice: ${breakdown.voice}`;
+  // voice override lookup by character id
+  const voiceByChar = {};
+  (voiceResolution?.characters || []).forEach((c) => {
+    voiceByChar[c.id] = c.voice;
+  });
+
   return (
     <div className="es-card p-5" data-testid={`scene-${scene.id}`}>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
         <div className="flex items-center gap-3">
           <span className="font-mono text-[10px] uppercase tracking-widest text-[#A1A1AA]">
             Scene {String(index + 1).padStart(2, "0")}
@@ -502,6 +525,25 @@ function SceneEditor({ index, scene, characters, options, reload }) {
           <Badge variant="outline" className="border-white/15 text-[#A1A1AA] font-mono text-[10px]">
             {local.status || "draft"}
           </Badge>
+          <span
+            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border border-[#FFCC00]/30 bg-[#FFCC00]/5 text-[10px] font-mono"
+            data-testid={`scene-credits-${scene.id}`}
+            title={missing ? "Some unit costs are missing" : breakdownTooltip}
+          >
+            <Coins className="w-3 h-3 text-[#FFCC00]" />
+            <span className="text-[#A1A1AA] uppercase tracking-widest">
+              Credits this scene
+            </span>
+            <span className="text-white">
+              {missing ? "estimate unavailable" : `~${sceneTotal}`}
+            </span>
+            {!missing && (
+              <span className="text-[#A1A1AA]" data-testid={`scene-credits-breakdown-${scene.id}`}>
+                · img {breakdown.image} · vid {breakdown.video}
+                {segmentsCount > 1 ? ` (${segmentsCount}×)` : ""} · voice {breakdown.voice}
+              </span>
+            )}
+          </span>
         </div>
         <Button
           variant="ghost"
@@ -553,6 +595,17 @@ function SceneEditor({ index, scene, characters, options, reload }) {
             <div className="flex flex-wrap gap-2">
               {characters.map((c) => {
                 const active = (local.characters || []).includes(c.id);
+                const hasOverride = !!c.voice_provider;
+                const eff = voiceByChar[c.id];
+                const tooltip = eff
+                  ? `Voice: ${eff.provider || "—"}/${eff.model || "—"}\nSource: ${
+                      eff.source === "character"
+                        ? "Character Override"
+                        : eff.source === "project"
+                          ? "Project Override"
+                          : "Global Default"
+                    }`
+                  : `${c.name}`;
                 return (
                   <button
                     key={c.id}
@@ -565,13 +618,22 @@ function SceneEditor({ index, scene, characters, options, reload }) {
                       patch("characters", next);
                       save("characters", next);
                     }}
-                    className={`px-3 py-1 text-xs rounded-md border transition-colors ${
+                    title={tooltip}
+                    className={`px-3 py-1 text-xs rounded-md border transition-colors inline-flex items-center gap-1.5 ${
                       active
                         ? "bg-[#FF3B30] border-[#FF3B30] text-white"
                         : "bg-transparent border-white/15 text-[#A1A1AA] hover:text-white hover:bg-white/5"
                     }`}
                   >
                     {c.name}
+                    {hasOverride && (
+                      <span
+                        data-testid={`char-voice-chip-${scene.id}-${c.id}`}
+                        className="px-1.5 py-0.5 rounded text-[9px] font-mono uppercase tracking-wider bg-[#FFCC00]/15 text-[#FFCC00] border border-[#FFCC00]/30"
+                      >
+                        Voice Override
+                      </span>
+                    )}
                   </button>
                 );
               })}

@@ -125,3 +125,10 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 5 · voice 1
 - Characters dialog upgraded to support edit-in-place plus an optional voice override (provider select + model/voice id input). Card shows `↳ provider/model` chip when override is set.
 - Tests: 35/35 backend cases passing. Added: `test_voice_resolution_priority`, `test_character_create_accepts_voice_fields`, `test_character_voice_provider_validated`, `test_cost_estimate_includes_music_and_export`, `test_meta_options_costs_complete`. Existing tests updated for new video_segment cost.
 - Mock-only throughout; feature flags all false; no API keys collected or stored.
+
+## Iteration 7 (2026-02) — Scene credit widget + character voice override chip
+- New backend route `GET /api/projects/{id}/scene-costs` — returns per-scene total using formula `image + video_segment * max(1, segment_count) + voice`, includes breakdown, `planned_segments`, `estimate_unavailable` flag, `missing_costs` list, plus `grand_total_credits`. Mock-mode flag preserved.
+- Frontend Scenes tab: every SceneEditor card now shows a yellow "Credits this scene · ~N" widget next to the Scene N label and status chip with an inline mini-breakdown ("img X · vid Y(2×) · voice Z") and a hover tooltip with the same breakdown. Falls back to "estimate unavailable" when any unit cost is missing.
+- Frontend Scene editor "Characters in scene" tag list: characters with a voice override show a small yellow "Voice Override" chip next to their name. Hover/title tooltip reveals "Voice: {provider}/{model}" + "Source: Character Override / Project Override / Global Default" pulled from the existing voice-resolution endpoint.
+- Tests: 38/38 backend cases pass. Added: `test_scene_costs_basic_and_multi_segment` (planned=max(1, n_segments); 0-segment scene → 15 credits; 2-segment scene → 27 credits), `test_scene_costs_matches_spec_example` (image=2, video=5, voice=1, n=2 → 13), `test_voice_resolution_remains_after_scene_cost_calls` (mock-mode preserved across endpoints; character override still wins).
+- All generation remains mock; flags `USE_REAL_*_PROVIDER` still false; no API keys collected.

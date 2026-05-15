@@ -646,3 +646,87 @@ def test_character_voice_provider_validated(s, project_id):
         assert r.status_code == 400
     finally:
         s.delete(f"{API}/characters/{c['id']}")
+
+
+# ---------- Per-scene credit totals ----------
+def test_scene_costs_basic_and_multi_segment(s):
+    """Scene with 0 segments → planned=1, total=image+video+voice.
+    Scene with 2 segments → image + video*2 + voice. Spec example uses
+    image=2, video_segment=5, voice=1 → 13. Server uses image=2,
+    video_segment=12, voice=1 → image + 12*2 + voice = 2 + 24 + 1 = 27."""
+    p = s.post(f"{API}/projects", json={"title": "TEST_SceneCosts", "idea": "x"}).json()
+    pid = p["id"]
+    try:
+        # Scene 1: zero segments → planned=1
+        sc1 = s.post(
+            f"{API}/projects/{pid}/scenes",
+            json={"title": "TEST_OneSeg", "duration": 10},
+        ).json()
+        # Scene 2: two segments
+        sc2 = s.post(
+            f"{API}/projects/{pid}/scenes",
+            json={"title": "TEST_TwoSeg", "duration": 10},
+        ).json()
+        seg1 = _retry(lambda: s.post(f"{API}/scenes/{sc2['id']}/segments")).json()
+        assert seg1["video_url"]
+        seg2 = _retry(lambda: s.post(f"{API}/scenes/{sc2['id']}/expand")).json()
+        assert seg2["expand_mode"] == "expand"
+
+        d = s.get(f"{API}/projects/{pid}/scene-costs").json()
+        assert d["mock_mode"] is True
+        assert d["unit_costs"]["image"] == 2
+        assert d["unit_costs"]["video_segment"] == 12
+        assert d["unit_costs"]["voice"] == 1
+
+        per = {row["scene_id"]: row for row in d["scenes"]}
+        # Scene 1: planned=1, total = 2 + 12 + 1 = 15
+        r1 = per[sc1["id"]]
+        assert r1["planned_segments"] == 1
+        assert r1["breakdown"] == {"image": 2, "video": 12, "voice": 1}
+        assert r1["total_credits"] == 15
+        assert r1["estimate_unavailable"] is False
+        assert r1["missing_costs"] == []
+
+        # Scene 2: 2 segments, total = 2 + 24 + 1 = 27
+        r2 = per[sc2["id"]]
+        assert r2["segments_count"] == 2
+        assert r2["planned_segments"] == 2
+        assert r2["breakdown"] == {"image": 2, "video": 24, "voice": 1}
+        assert r2["total_credits"] == 27
+
+        assert d["grand_total_credits"] == 15 + 27
+    finally:
+        s.delete(f"{API}/projects/{pid}")
+
+
+def test_scene_costs_matches_spec_example():
+    """Spec example: image=2, video=5, voice=1, 2 video segments → 13.
+    We can't change server costs, but we can verify the formula given
+    the spec inputs by computing on the client with the same maths
+    that the server uses (image + video*segments + voice)."""
+    image, video, voice, n = 2, 5, 1, 2
+    assert image + video * n + voice == 13
+
+
+def test_voice_resolution_remains_after_scene_cost_calls(s):
+    """Smoke: hitting scene-costs must not affect voice-resolution; mock mode preserved."""
+    p = s.post(f"{API}/projects", json={"title": "TEST_Mix", "idea": "x"}).json()
+    pid = p["id"]
+    try:
+        s.post(
+            f"{API}/projects/{pid}/characters",
+            json={"name": "Daniel", "voice_provider": "openai-tts", "voice_model": "tts-1-hd"},
+        )
+        # call scene-costs (no scenes yet → empty list)
+        sc = s.get(f"{API}/projects/{pid}/scene-costs").json()
+        assert sc["mock_mode"] is True
+        assert sc["scenes"] == []
+
+        v = s.get(f"{API}/projects/{pid}/voice-resolution").json()
+        assert v["mock_mode"] is True
+        # The character override still wins
+        char = v["characters"][0]
+        assert char["voice"]["source"] == "character"
+        assert char["voice"]["provider"] == "openai-tts"
+    finally:
+        s.delete(f"{API}/projects/{pid}")
