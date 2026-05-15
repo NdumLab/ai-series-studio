@@ -4,6 +4,7 @@ import { Button } from "../../components/ui/button";
 import { SortableList } from "../../components/SortableList";
 import { SceneCard } from "../../components/studio/SceneCard";
 import { InfoCallout } from "../../components/studio/InfoCallout";
+import { EpisodeArcStrip } from "../../components/studio/EpisodeArcStrip";
 import { Scenes } from "../../lib/api";
 
 export function ScenesTab({
@@ -59,6 +60,7 @@ export function ScenesTab({
         </div>
       </div>
       <InfoCallout text="Edit titles, locations, prompts and dialogue here. Drag the grip handle to reorder scenes. Image and video generation happen in their own tabs." />
+      <EpisodeArcStrip scenes={scenes} />
       <SortableList
         items={scenes}
         getId={(s) => s.id}

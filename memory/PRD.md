@@ -450,3 +450,38 @@ Pure-logic, zero-network. Deterministic scoring + enhancement helpers:
 - ESLint clean across `/pages/` and `/components/`.
 - Production build OK (24.95s).
 - Testing agent iteration_4: 100% backend, 100% frontend, 0 issues, retest_needed=false.
+
+## Iteration 20 (2026-02) — Episode Arc Visualizer (frontend-only)
+**Goal**: turn "I have a feeling Act 2 is flat" into a glance.
+
+### Frontend
+- New `EpisodeArcStrip.jsx` at the top of the Scenes tab. One bar per scene, bar height = `tension_level / 100`, bar color tracks the same green→yellow→orange→red threshold as the tension meter on each card.
+- Native `title` tooltip on each bar surfaces: scene title, tension level, emotional goal, conflict point, cliffhanger value.
+- Interpretation label (rule-based, deterministic):
+  - `Flat tension curve` — max − min < 15.
+  - `Strong climax build` — last third is highest AND the last value ≥ 75.
+  - `Middle sag detected` — middle third avg is ≥ 5 below both ends.
+  - `Rising tension arc` — last third ≥ first third + 8.
+  - `Falling tension arc` — first third ≥ last third + 8.
+  - `Steady tension` — none of the above.
+- Reuses the existing `scenes[*].tension_level` data — **zero new endpoints, zero new DB fields, zero new backend code**.
+- Frontend-light: ~95 lines of inline JSX/CSS, no SVG library.
+
+### Mock-only invariants — preserved
+- No real-network code anywhere. `providers/` package still empty of http imports. `creative_quality.py` unchanged.
+- All `USE_REAL_*_PROVIDER` flags `false`. `key_present()` always `False`.
+- No API key inputs, no Stripe, no auth, no real LLM wiring.
+
+### Checks
+- Backend pytest: **102/102 passing** (unchanged from iteration 19 — this iteration is frontend-only).
+- ESLint: clean across `/pages/` and `/components/`.
+- Production build: OK (26.11s, ~180 kB gzip).
+- Defensive grep for network imports in `providers/` + `creative_quality.py`: clean.
+
+### Files changed (2)
+**Added** (1): `frontend/src/components/studio/EpisodeArcStrip.jsx`
+**Modified** (1): `frontend/src/pages/tabs/ScenesTab.jsx` — imports + renders `<EpisodeArcStrip scenes={scenes} />` right under the InfoCallout.
+
+### Hold
+Stopped before Phase 2B real-LLM wiring per user. The next milestone is the **Emergent universal LLM key → real LLM provider** wiring (LLM modality only).
+
