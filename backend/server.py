@@ -62,7 +62,15 @@ MOCK_VIDEO_URLS = [
 VOICE_OPTIONS = ["Narrator-Deep", "Narrator-Warm", "Hero-Bold", "Heroine-Calm", "Villain-Raspy", "Child-Bright"]
 MUSIC_MOODS = ["Cinematic", "Tense", "Uplifting", "Mysterious", "Romantic", "Action", "Melancholic"]
 
-COSTS = {"rewrite": 3, "split_scenes": 4, "image": 2, "video_segment": 5, "voice": 1}
+COSTS = {
+    "rewrite": 3,
+    "split_scenes": 4,
+    "image": 2,
+    "video_segment": 12,
+    "voice": 1,
+    "music": 2,
+    "export": 5,
+}
 
 # ---------------------------------------------------------------------------
 # Provider catalog (display only — no real calls)
@@ -287,6 +295,8 @@ class CharacterCreate(BaseModel):
     name: str
     description: str = ""
     voice_style: str = "Narrator-Warm"
+    voice_provider: str = ""
+    voice_model: str = ""
     reference_image_url: Optional[str] = None
 
 
@@ -294,6 +304,8 @@ class CharacterUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     voice_style: Optional[str] = None
+    voice_provider: Optional[str] = None
+    voice_model: Optional[str] = None
     reference_image_url: Optional[str] = None
 
 
@@ -529,6 +541,56 @@ async def test_project_provider(project_id: str, body: ProviderTestRequest):
     }
 
 
+@api.get("/projects/{project_id}/voice-resolution")
+async def project_voice_resolution(project_id: str):
+    """Resolve effective voice per character with priority:
+    character override → project override → global default."""
+    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    effective = await _build_effective_providers(proj)
+    project_voice = {
+        "provider": effective["voice"]["provider"],
+        "model": effective["voice"]["model"],
+        "source": effective["voice"]["source"],  # "global" | "global-fallback" | "project"
+    }
+    chars = await db.characters.find(
+        {"project_id": project_id}, {"_id": 0}
+    ).to_list(500)
+    out_chars = []
+    for c in chars:
+        cv_provider = (c.get("voice_provider") or "").strip()
+        cv_model = (c.get("voice_model") or "").strip()
+        if cv_provider:
+            voice = {
+                "provider": cv_provider,
+                "model": cv_model,
+                "source": "character",
+            }
+        else:
+            voice = {**project_voice}
+            # When falling through from a character, label it as project- or global-derived
+            voice["source"] = (
+                "project"
+                if project_voice["source"] == "project"
+                else "global"
+            )
+        out_chars.append({
+            "id": c["id"],
+            "name": c.get("name"),
+            "voice_style": c.get("voice_style"),
+            "voice": voice,
+        })
+    return {
+        "project_id": project_id,
+        "mock_mode": True,
+        "global_voice": _global_modality_view(await _load_provider_settings(), "voice"),
+        "project_voice": project_voice,
+        "characters": out_chars,
+    }
+
+
+
 
 # ---------------------------------------------------------------------------
 # Projects
@@ -653,6 +715,8 @@ async def create_character(project_id: str, body: CharacterCreate):
         "name": body.name,
         "description": body.description,
         "voice_style": body.voice_style,
+        "voice_provider": (body.voice_provider or "").strip(),
+        "voice_model": (body.voice_model or "").strip(),
         "reference_image_url": body.reference_image_url or MOCK_CHARACTER_IMAGE,
         "created_at": now_iso(),
     }
@@ -665,6 +729,11 @@ async def update_character(character_id: str, body: CharacterUpdate):
     update = {k: v for k, v in body.model_dump(exclude_none=True).items()}
     if not update:
         raise HTTPException(400, "No fields")
+    # Validate voice_provider against catalog if it's being set to a non-empty value
+    if "voice_provider" in update and update["voice_provider"]:
+        valid = {p["id"] for p in PROVIDER_CATALOG["voice"]}
+        if update["voice_provider"] not in valid:
+            raise HTTPException(400, f"Unknown voice provider: {update['voice_provider']}")
     res = await db.characters.update_one({"id": character_id}, {"$set": update})
     if res.matched_count == 0:
         raise HTTPException(404, "Character not found")

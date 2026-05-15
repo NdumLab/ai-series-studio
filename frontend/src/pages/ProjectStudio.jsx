@@ -74,6 +74,7 @@ export default function ProjectStudio() {
   const { id } = useParams();
   const [data, setData] = useState(null);
   const [providers, setProviders] = useState(null);
+  const [voiceRes, setVoiceRes] = useState(null);
   const [options, setOptions] = useState({ voices: [], music_moods: [], costs: {} });
   const [tab, setTab] = useState("story");
 
@@ -82,12 +83,21 @@ export default function ProjectStudio() {
     () => ProjectProviders.get(id).then(setProviders),
     [id]
   );
+  const loadVoiceRes = useCallback(
+    () => ProjectProviders.voiceResolution(id).then(setVoiceRes),
+    [id]
+  );
+  const reloadAll = useCallback(() => {
+    load();
+    loadVoiceRes();
+  }, [load, loadVoiceRes]);
 
   useEffect(() => {
     load();
     loadProviders();
+    loadVoiceRes();
     Meta.options().then(setOptions);
-  }, [load, loadProviders]);
+  }, [load, loadProviders, loadVoiceRes]);
 
   if (!data) return <div className="text-[#A1A1AA] text-sm">Loading project…</div>;
   const { project, scenes, characters } = data;
@@ -152,6 +162,7 @@ export default function ProjectStudio() {
           <StoryTab
             project={project}
             providers={providers}
+            options={options}
             reload={load}
             onContinue={() => setTab("scenes")}
           />
@@ -170,28 +181,48 @@ export default function ProjectStudio() {
             project={project}
             characters={characters}
             voices={options.voices}
-            reload={load}
+            voiceCatalog={providers?.effective ? null : null}
+            reload={reloadAll}
           />
         </TabsContent>
         <TabsContent value="images" className="mt-6">
-          <ImagesTab scenes={scenes} providers={providers} reload={load} />
+          <ImagesTab
+            scenes={scenes}
+            providers={providers}
+            options={options}
+            reload={load}
+          />
         </TabsContent>
         <TabsContent value="segments" className="mt-6">
-          <SegmentsTab scenes={scenes} providers={providers} reload={load} />
+          <SegmentsTab
+            scenes={scenes}
+            providers={providers}
+            options={options}
+            reload={load}
+          />
         </TabsContent>
         <TabsContent value="voice-music" className="mt-6">
           <VoiceMusicTab
             scenes={scenes}
             options={options}
             providers={providers}
-            reload={load}
+            characters={characters}
+            voiceResolution={voiceRes}
+            onCharacterEdit={() => setTab("characters")}
+            reload={reloadAll}
           />
         </TabsContent>
         <TabsContent value="export" className="mt-6">
-          <ExportTab projectId={id} providers={providers} />
+          <ExportTab projectId={id} providers={providers} options={options} />
         </TabsContent>
         <TabsContent value="providers" className="mt-6">
-          <ProvidersTab projectId={id} onChanged={loadProviders} />
+          <ProvidersTab
+            projectId={id}
+            onChanged={() => {
+              loadProviders();
+              loadVoiceRes();
+            }}
+          />
         </TabsContent>
       </Tabs>
     </div>
@@ -266,7 +297,7 @@ function CostBadge({ projectId }) {
 // ---------------------------------------------------------------------------
 // Story tab
 // ---------------------------------------------------------------------------
-function StoryTab({ project, providers, reload, onContinue }) {
+function StoryTab({ project, providers, options, reload, onContinue }) {
   const [idea, setIdea] = useState(project.idea || "");
   const [story, setStory] = useState(project.rewritten_story || "");
   const [busy, setBusy] = useState(false);
@@ -318,6 +349,7 @@ function StoryTab({ project, providers, reload, onContinue }) {
         providers={providers}
         modality="llm"
         action="story rewrite"
+        credits={options?.costs?.rewrite ? `~${options.costs.rewrite} credits` : null}
       />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <div className="es-card p-6">
@@ -579,12 +611,11 @@ function InfoCallout({ text }) {
 // ---------------------------------------------------------------------------
 // Inline provider hint — informational only, mock-only
 // ---------------------------------------------------------------------------
-function ProviderHint({ providers, modality, action, testId }) {
+function ProviderHint({ providers, modality, action, credits, testId }) {
   if (!providers) return null;
   const eff = providers.effective?.[modality];
   if (!eff) return null;
   const overrideOn = providers.provider_override_enabled;
-  // Show project-source vs anything else; "global" and "global-fallback" both fall back to global defaults
   const usingProject = overrideOn && eff.source === "project";
   const provider = eff.provider || "—";
   const model = eff.model || (eff.custom_model || "—");
@@ -606,6 +637,14 @@ function ProviderHint({ providers, modality, action, testId }) {
         >
           {displayProvider}/{model}
         </span>
+        {credits ? (
+          <span
+            className="text-[#FFCC00] font-mono ml-2"
+            data-testid={`hint-credits-${modality}`}
+          >
+            · {credits}
+          </span>
+        ) : null}
       </span>
       <span
         data-testid={`hint-badge-${modality}`}
@@ -624,13 +663,19 @@ function ProviderHint({ providers, modality, action, testId }) {
 // ---------------------------------------------------------------------------
 // Images tab — generate / approve scene images
 // ---------------------------------------------------------------------------
-function ImagesTab({ scenes, providers, reload }) {
+function ImagesTab({ scenes, providers, options, reload }) {
   if (!scenes.length) {
     return <EmptyState text="Split your story into scenes first to generate images." />;
   }
+  const c = options?.costs?.image;
   return (
     <div className="space-y-3">
-      <ProviderHint providers={providers} modality="image" action="image generation" />
+      <ProviderHint
+        providers={providers}
+        modality="image"
+        action="image generation"
+        credits={c ? `~${c} credits per scene image` : null}
+      />
       <InfoCallout text="Generate or regenerate one image per scene. The image becomes the visual anchor for video generation." />
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" data-testid="images-grid">
         {scenes.map((s, i) => (
@@ -692,13 +737,19 @@ function SceneImageCard({ scene, index, reload }) {
 // ---------------------------------------------------------------------------
 // Video Segments tab
 // ---------------------------------------------------------------------------
-function SegmentsTab({ scenes, providers, reload }) {
+function SegmentsTab({ scenes, providers, options, reload }) {
   if (!scenes.length) {
     return <EmptyState text="Split your story into scenes first." />;
   }
+  const c = options?.costs?.video_segment;
   return (
     <div className="space-y-4" data-testid="segments-tab">
-      <ProviderHint providers={providers} modality="video" action="video generation" />
+      <ProviderHint
+        providers={providers}
+        modality="video"
+        action="video generation"
+        credits={c ? `~${c} credits per 5-second segment` : null}
+      />
       <InfoCallout text="Each scene contains 5-second video segments. Use 'Expand next 5s' to chain a continuation that references the previous segment." />
       {scenes.map((s, i) => (
         <SceneSegmentBlock key={s.id} scene={s} index={i} reload={reload} />
@@ -911,22 +962,101 @@ function SegmentCard({ segment, index, parent, reload }) {
 // ---------------------------------------------------------------------------
 // Voice / Music tab
 // ---------------------------------------------------------------------------
-function VoiceMusicTab({ scenes, options, providers, reload }) {
+function VoiceMusicTab({ scenes, options, providers, characters, voiceResolution, onCharacterEdit, reload }) {
   if (!scenes.length) {
     return <EmptyState text="Split your story into scenes first." />;
   }
+  const cv = options?.costs?.voice;
+  const cm = options?.costs?.music;
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <ProviderHint providers={providers} modality="voice" action="voice generation" />
-        <ProviderHint providers={providers} modality="music" action="music generation" />
+        <ProviderHint
+          providers={providers}
+          modality="voice"
+          action="voice generation"
+          credits={cv ? `~${cv} credit per scene` : null}
+        />
+        <ProviderHint
+          providers={providers}
+          modality="music"
+          action="music generation"
+          credits={cm ? `~${cm} credits per scene` : null}
+        />
       </div>
+      <CharacterVoiceList
+        voiceResolution={voiceResolution}
+        characters={characters}
+        onCharacterEdit={onCharacterEdit}
+      />
       <InfoCallout text="Pick the narrator voice and music mood for each scene. Voice and music will be rendered into the final mix." />
       <div className="space-y-3" data-testid="voice-music-list">
         {scenes.map((s, i) => (
           <VoiceMusicRow key={s.id} scene={s} index={i} options={options} reload={reload} />
         ))}
       </div>
+    </div>
+  );
+}
+
+function CharacterVoiceList({ voiceResolution, characters, onCharacterEdit }) {
+  if (!voiceResolution || !voiceResolution.characters?.length) return null;
+  const sourceLabel = (src) =>
+    src === "character"
+      ? "Character Override"
+      : src === "project"
+        ? "Project Override"
+        : "Global Default";
+  const sourceCls = (src) =>
+    src === "character"
+      ? "border-[#FFCC00]/50 text-[#FFCC00]"
+      : src === "project"
+        ? "border-[#FF3B30]/40 text-[#FF3B30]"
+        : "border-white/15 text-[#A1A1AA]";
+  return (
+    <div className="es-card p-4" data-testid="character-voice-list">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h4 className="font-display text-base font-bold">Per-character voices</h4>
+          <p className="text-xs text-[#A1A1AA]">
+            Resolution priority: character override → project override → global default.
+          </p>
+        </div>
+      </div>
+      <ul className="space-y-2">
+        {voiceResolution.characters.map((c) => (
+          <li
+            key={c.id}
+            className="flex flex-wrap items-center gap-2 py-2 border-b border-white/5 last:border-0"
+            data-testid={`char-voice-${c.id}`}
+          >
+            <span className="text-sm text-white font-semibold min-w-[120px]">{c.name}</span>
+            <span className="text-xs text-[#A1A1AA] font-mono">
+              voice:{" "}
+              <span className="text-white" data-testid={`char-voice-text-${c.id}`}>
+                {c.voice.provider || "—"}/{c.voice.model || "—"}
+              </span>
+            </span>
+            <span
+              className={`px-2 py-0.5 rounded-md text-[10px] font-mono uppercase tracking-widest border ${sourceCls(c.voice.source)}`}
+              data-testid={`char-voice-badge-${c.id}`}
+            >
+              {sourceLabel(c.voice.source)}
+            </span>
+            {onCharacterEdit && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => onCharacterEdit(characters.find((ch) => ch.id === c.id))}
+                data-testid={`edit-char-voice-${c.id}`}
+                className="ml-auto text-[#A1A1AA] hover:text-white hover:bg-white/5 h-7"
+              >
+                Edit
+              </Button>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -981,27 +1111,78 @@ function VoiceMusicRow({ scene, index, options, reload }) {
 // ---------------------------------------------------------------------------
 // Characters tab
 // ---------------------------------------------------------------------------
+const VOICE_PROVIDER_OPTIONS = [
+  { id: "elevenlabs", label: "ElevenLabs" },
+  { id: "openai-tts", label: "OpenAI TTS" },
+  { id: "google-tts", label: "Google Cloud TTS" },
+  { id: "custom", label: "Custom voice provider" },
+];
+
 function CharactersTab({ project, characters, voices, reload }) {
   const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [desc, setDesc] = useState("");
-  const [voice, setVoice] = useState("Narrator-Warm");
+  const [editing, setEditing] = useState(null); // null | character object
+  const [form, setForm] = useState({
+    name: "",
+    description: "",
+    voice_style: "Narrator-Warm",
+    voice_provider: "",
+    voice_model: "",
+  });
 
-  const create = async () => {
-    if (!name.trim()) {
+  const reset = () => {
+    setEditing(null);
+    setForm({
+      name: "",
+      description: "",
+      voice_style: "Narrator-Warm",
+      voice_provider: "",
+      voice_model: "",
+    });
+  };
+
+  const startEdit = (c) => {
+    setEditing(c);
+    setForm({
+      name: c.name || "",
+      description: c.description || "",
+      voice_style: c.voice_style || "Narrator-Warm",
+      voice_provider: c.voice_provider || "",
+      voice_model: c.voice_model || "",
+    });
+    setOpen(true);
+  };
+
+  const submit = async () => {
+    if (!form.name.trim()) {
       toast.error("Name required");
       return;
     }
-    await Characters.create(project.id, {
-      name: name.trim(),
-      description: desc.trim(),
-      voice_style: voice,
-    });
-    toast.success("Character added");
-    setOpen(false);
-    setName("");
-    setDesc("");
-    reload();
+    try {
+      if (editing) {
+        await Characters.update(editing.id, {
+          name: form.name.trim(),
+          description: form.description.trim(),
+          voice_style: form.voice_style,
+          voice_provider: form.voice_provider,
+          voice_model: form.voice_model,
+        });
+        toast.success("Character updated");
+      } else {
+        await Characters.create(project.id, {
+          name: form.name.trim(),
+          description: form.description.trim(),
+          voice_style: form.voice_style,
+          voice_provider: form.voice_provider,
+          voice_model: form.voice_model,
+        });
+        toast.success("Character added");
+      }
+      setOpen(false);
+      reset();
+      reload();
+    } catch {
+      toast.error("Save failed");
+    }
   };
 
   const remove = async (id) => {
@@ -1014,7 +1195,13 @@ function CharactersTab({ project, characters, voices, reload }) {
     <div>
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-display text-xl font-bold">Cast</h3>
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog
+          open={open}
+          onOpenChange={(o) => {
+            setOpen(o);
+            if (!o) reset();
+          }}
+        >
           <DialogTrigger asChild>
             <Button
               data-testid="open-add-character-btn"
@@ -1023,45 +1210,121 @@ function CharactersTab({ project, characters, voices, reload }) {
               <UserPlus className="w-4 h-4 mr-2" /> Add character
             </Button>
           </DialogTrigger>
-          <DialogContent className="bg-[#121212] border-white/10 text-white">
+          <DialogContent className="bg-[#121212] border-white/10 text-white max-w-lg">
             <DialogHeader>
-              <DialogTitle className="font-display">New character</DialogTitle>
+              <DialogTitle className="font-display">
+                {editing ? "Edit character" : "New character"}
+              </DialogTitle>
               <DialogDescription className="text-[#A1A1AA]">
-                Define a recurring cast member with voice and look.
+                Define a recurring cast member, optionally with a voice override.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-3">
               <div>
                 <label className="es-label block mb-1.5">Name</label>
-                <Input value={name} onChange={(e) => setName(e.target.value)}
+                <Input
+                  value={form.name}
+                  onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
                   data-testid="char-name-input"
-                  className="bg-[#0A0A0A] border-white/10 text-white" />
+                  className="bg-[#0A0A0A] border-white/10 text-white"
+                />
               </div>
               <div>
                 <label className="es-label block mb-1.5">Description</label>
-                <Textarea value={desc} onChange={(e) => setDesc(e.target.value)}
+                <Textarea
+                  value={form.description}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, description: e.target.value }))
+                  }
                   data-testid="char-desc-input"
-                  className="bg-[#0A0A0A] border-white/10 text-white" />
+                  className="bg-[#0A0A0A] border-white/10 text-white"
+                />
               </div>
               <div>
                 <label className="es-label block mb-1.5">Voice style</label>
-                <Select value={voice} onValueChange={setVoice}>
-                  <SelectTrigger className="bg-[#0A0A0A] border-white/10 text-white" data-testid="char-voice-select">
+                <Select
+                  value={form.voice_style}
+                  onValueChange={(v) => setForm((p) => ({ ...p, voice_style: v }))}
+                >
+                  <SelectTrigger
+                    className="bg-[#0A0A0A] border-white/10 text-white"
+                    data-testid="char-voice-select"
+                  >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent className="bg-[#121212] border-white/10 text-white">
-                    {voices.map((v) => (<SelectItem key={v} value={v}>{v}</SelectItem>))}
+                    {voices.map((v) => (
+                      <SelectItem key={v} value={v}>{v}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
+              <div className="es-card p-3 bg-white/[0.02]">
+                <p className="es-label mb-2">Voice override (optional)</p>
+                <p className="text-[10px] text-[#A1A1AA] mb-3">
+                  Beats project + global voice settings for this character.
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="es-label block mb-1.5">Provider</label>
+                    <Select
+                      value={form.voice_provider || "__none__"}
+                      onValueChange={(v) =>
+                        setForm((p) => ({
+                          ...p,
+                          voice_provider: v === "__none__" ? "" : v,
+                          voice_model: v === "__none__" ? "" : p.voice_model,
+                        }))
+                      }
+                    >
+                      <SelectTrigger
+                        className="bg-[#0A0A0A] border-white/10 text-white"
+                        data-testid="char-voice-provider-select"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="bg-[#121212] border-white/10 text-white">
+                        <SelectItem value="__none__">— inherit —</SelectItem>
+                        {VOICE_PROVIDER_OPTIONS.map((v) => (
+                          <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="es-label block mb-1.5">Model / voice id</label>
+                    <Input
+                      value={form.voice_model}
+                      onChange={(e) =>
+                        setForm((p) => ({ ...p, voice_model: e.target.value }))
+                      }
+                      placeholder="e.g. eleven-v3"
+                      disabled={!form.voice_provider}
+                      data-testid="char-voice-model-input"
+                      className="bg-[#0A0A0A] border-white/10 text-white"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setOpen(false)}
-                className="border-white/15 bg-transparent text-white hover:bg-white/10 hover:text-white">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setOpen(false);
+                  reset();
+                }}
+                className="border-white/15 bg-transparent text-white hover:bg-white/10 hover:text-white"
+              >
                 Cancel
               </Button>
-              <Button onClick={create} data-testid="submit-add-character-btn"
-                className="bg-[#FF3B30] hover:bg-[#FF453A] text-white">Add</Button>
+              <Button
+                onClick={submit}
+                data-testid="submit-add-character-btn"
+                className="bg-[#FF3B30] hover:bg-[#FF453A] text-white"
+              >
+                {editing ? "Save" : "Add"}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -1070,23 +1333,53 @@ function CharactersTab({ project, characters, voices, reload }) {
       {characters.length === 0 ? (
         <div className="es-card p-12 text-center text-[#A1A1AA]">No characters yet.</div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" data-testid="characters-grid">
+        <div
+          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+          data-testid="characters-grid"
+        >
           {characters.map((c) => (
             <div key={c.id} className="es-card overflow-hidden" data-testid={`char-${c.id}`}>
               <div className="aspect-[4/5] bg-black overflow-hidden">
-                <img src={c.reference_image_url} alt={c.name} className="w-full h-full object-cover" />
+                <img
+                  src={c.reference_image_url}
+                  alt={c.name}
+                  className="w-full h-full object-cover"
+                />
               </div>
               <div className="p-4">
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <h4 className="font-display text-lg font-bold">{c.name}</h4>
                     <p className="text-xs text-[#A1A1AA] font-mono">{c.voice_style}</p>
+                    {c.voice_provider && (
+                      <p
+                        className="text-[10px] text-[#FFCC00] font-mono mt-1"
+                        data-testid={`char-voice-tag-${c.id}`}
+                      >
+                        ↳ {c.voice_provider}/{c.voice_model || "—"}
+                      </p>
+                    )}
                   </div>
-                  <Button size="sm" variant="ghost" onClick={() => remove(c.id)}
-                    data-testid={`delete-char-${c.id}`}
-                    className="text-[#A1A1AA] hover:text-[#FF3B30] hover:bg-white/5">
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
+                  <div className="flex flex-col gap-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => startEdit(c)}
+                      data-testid={`edit-char-${c.id}`}
+                      className="text-[#A1A1AA] hover:text-white hover:bg-white/5 h-7"
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => remove(c.id)}
+                      data-testid={`delete-char-${c.id}`}
+                      className="text-[#A1A1AA] hover:text-[#FF3B30] hover:bg-white/5 h-7"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
                 </div>
                 {c.description && (
                   <p className="text-sm text-[#A1A1AA] mt-2 line-clamp-3">{c.description}</p>
@@ -1103,16 +1396,22 @@ function CharactersTab({ project, characters, voices, reload }) {
 // ---------------------------------------------------------------------------
 // Export tab
 // ---------------------------------------------------------------------------
-function ExportTab({ projectId, providers }) {
+function ExportTab({ projectId, providers, options }) {
   const [data, setData] = useState(null);
   useEffect(() => {
     Projects.export(projectId).then(setData);
   }, [projectId]);
   if (!data) return <div className="text-[#A1A1AA] text-sm">Loading export…</div>;
+  const c = options?.costs?.export;
 
   return (
     <div className="space-y-4" data-testid="export-view">
-      <ProviderHint providers={providers} modality="export" action="export" />
+      <ProviderHint
+        providers={providers}
+        modality="export"
+        action="export"
+        credits={c ? `~${c} credits per final export` : null}
+      />
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 es-card p-4">
         <div className="aspect-video bg-black rounded-md border border-white/10 overflow-hidden mb-4 relative">

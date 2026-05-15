@@ -110,3 +110,18 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 5 · voice 1
 - Backend: no new endpoints — reuses the existing `/projects/{id}/providers` resolver.
 - Tests: 30/30 passing. Added `test_effective_resolution_per_modality` asserting full merge semantics for all six modalities (override OFF → all global; override ON + value → project; override ON + empty → global-fallback) plus `mock_mode=True` and all USE_REAL_*_PROVIDER flags `False` throughout.
 - No real API calls; no API key fields added or stored.
+
+## Iteration 6 (2026-02) — Credit reflection + per-character voice override
+- Backend COSTS extended: `video_segment` bumped to 12, added `music: 2`, `export: 5`. Returned via `GET /api/meta/options.costs`.
+- Character schema gains `voice_provider` and `voice_model` (validated against the catalog when set, "" means inherit).
+- New endpoint `GET /api/projects/{id}/voice-resolution` resolves per-character voice with the priority **character → project → global** and returns `source` ∈ {"character","project","global"} for each.
+- Frontend ProviderHint now accepts a `credits` prop; each tab passes a label sourced from `options.costs`:
+  - Story → "~3 credits"
+  - Images → "~2 credits per scene image"
+  - Video Segments → "~12 credits per 5-second segment"
+  - Voice/Music → "~1 credit per scene" / "~2 credits per scene"
+  - Export → "~5 credits per final export"
+- Voice/Music tab shows a "Per-character voices" list with a colored source badge (Character Override / Project Override / Global Default) per character. Clicking Edit jumps to the Characters tab.
+- Characters dialog upgraded to support edit-in-place plus an optional voice override (provider select + model/voice id input). Card shows `↳ provider/model` chip when override is set.
+- Tests: 35/35 backend cases passing. Added: `test_voice_resolution_priority`, `test_character_create_accepts_voice_fields`, `test_character_voice_provider_validated`, `test_cost_estimate_includes_music_and_export`, `test_meta_options_costs_complete`. Existing tests updated for new video_segment cost.
+- Mock-only throughout; feature flags all false; no API keys collected or stored.

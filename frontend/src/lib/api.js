@@ -67,6 +67,8 @@ export const ProjectProviders = {
     api
       .post(`/projects/${projectId}/providers/test`, { modality })
       .then((r) => r.data),
+  voiceResolution: (projectId) =>
+    api.get(`/projects/${projectId}/voice-resolution`).then((r) => r.data),
 };
 
 export const Admin = {

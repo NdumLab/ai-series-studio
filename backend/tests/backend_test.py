@@ -211,8 +211,29 @@ def test_cost_estimate(s):
     r = s.post(f"{API}/cost-estimate", json={"operations": {"image": 4, "video_segment": 6}})
     assert r.status_code == 200
     d = r.json()
-    assert d["total_credits"] == 4 * 2 + 6 * 5
+    assert d["total_credits"] == 4 * 2 + 6 * 12
     assert "image" in d["breakdown"]
+
+
+def test_cost_estimate_includes_music_and_export(s):
+    r = s.post(
+        f"{API}/cost-estimate",
+        json={"operations": {"music": 3, "export": 1, "voice": 2}},
+    )
+    assert r.status_code == 200
+    d = r.json()
+    # music=2, export=5, voice=1 by default
+    assert d["total_credits"] == 3 * 2 + 1 * 5 + 2 * 1
+
+
+def test_meta_options_costs_complete(s):
+    r = s.get(f"{API}/meta/options")
+    costs = r.json()["costs"]
+    for k in ("rewrite", "split_scenes", "image", "video_segment", "voice", "music", "export"):
+        assert k in costs, f"costs missing {k}"
+    assert costs["video_segment"] == 12
+    assert costs["music"] == 2
+    assert costs["export"] == 5
 
 
 def test_project_cost_estimate(s, project_id):
@@ -523,3 +544,105 @@ def test_effective_resolution_per_modality(s):
             assert "Mock mode" in tr["message"]
     finally:
         s.delete(f"{API}/projects/{pid}")
+
+
+
+# ---------- Voice resolution (character → project → global) ----------
+def test_voice_resolution_priority(s):
+    """Character voice override beats project; project beats global; mock mode stays on."""
+    # Pin global voice
+    s.put(
+        f"{API}/settings/providers",
+        json={"voice": {"provider": "elevenlabs", "model": "eleven-v3"}},
+    )
+    p = s.post(f"{API}/projects", json={"title": "TEST_Voice", "idea": "x"}).json()
+    pid = p["id"]
+    try:
+        # Add two characters: one without override, one with character-level override
+        c1 = s.post(
+            f"{API}/projects/{pid}/characters",
+            json={"name": "Amara", "voice_style": "Heroine-Calm"},
+        ).json()
+        c2 = s.post(
+            f"{API}/projects/{pid}/characters",
+            json={
+                "name": "Daniel",
+                "voice_style": "Hero-Bold",
+                "voice_provider": "openai-tts",
+                "voice_model": "tts-1-hd",
+            },
+        ).json()
+
+        # 1. No project override → both fall through to global except c2 (character override)
+        d = s.get(f"{API}/projects/{pid}/voice-resolution").json()
+        assert d["mock_mode"] is True
+        assert d["global_voice"]["provider"] == "elevenlabs"
+        chars = {c["id"]: c for c in d["characters"]}
+        assert chars[c1["id"]]["voice"] == {
+            "provider": "elevenlabs", "model": "eleven-v3", "source": "global",
+        }
+        assert chars[c2["id"]]["voice"] == {
+            "provider": "openai-tts", "model": "tts-1-hd", "source": "character",
+        }
+
+        # 2. Enable project override → Amara picks up project value, Daniel keeps character override
+        s.put(
+            f"{API}/projects/{pid}/providers",
+            json={
+                "provider_override_enabled": True,
+                "voice_provider": "google-tts", "voice_model": "studio",
+            },
+        )
+        d2 = s.get(f"{API}/projects/{pid}/voice-resolution").json()
+        chars2 = {c["id"]: c for c in d2["characters"]}
+        assert chars2[c1["id"]]["voice"] == {
+            "provider": "google-tts", "model": "studio", "source": "project",
+        }
+        # Character-level override still wins over project override
+        assert chars2[c2["id"]]["voice"] == {
+            "provider": "openai-tts", "model": "tts-1-hd", "source": "character",
+        }
+
+        # 3. Update Amara to have a character override → she now uses it
+        s.put(
+            f"{API}/characters/{c1['id']}",
+            json={"voice_provider": "elevenlabs", "voice_model": "eleven-turbo"},
+        )
+        d3 = s.get(f"{API}/projects/{pid}/voice-resolution").json()
+        chars3 = {c["id"]: c for c in d3["characters"]}
+        assert chars3[c1["id"]]["voice"] == {
+            "provider": "elevenlabs", "model": "eleven-turbo", "source": "character",
+        }
+    finally:
+        s.delete(f"{API}/projects/{pid}")
+
+
+def test_character_create_accepts_voice_fields(s, project_id):
+    r = s.post(
+        f"{API}/projects/{project_id}/characters",
+        json={
+            "name": "TEST_VoiceChar",
+            "voice_provider": "elevenlabs",
+            "voice_model": "eleven-v3",
+        },
+    )
+    assert r.status_code == 200, r.text
+    c = r.json()
+    assert c["voice_provider"] == "elevenlabs"
+    assert c["voice_model"] == "eleven-v3"
+    s.delete(f"{API}/characters/{c['id']}")
+
+
+def test_character_voice_provider_validated(s, project_id):
+    c = s.post(
+        f"{API}/projects/{project_id}/characters",
+        json={"name": "TEST_BadVoice"},
+    ).json()
+    try:
+        r = s.put(
+            f"{API}/characters/{c['id']}",
+            json={"voice_provider": "totally-not-real"},
+        )
+        assert r.status_code == 400
+    finally:
+        s.delete(f"{API}/characters/{c['id']}")
