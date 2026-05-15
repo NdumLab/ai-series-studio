@@ -10,7 +10,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 
 ROOT_DIR = Path(__file__).parent
@@ -1400,6 +1400,59 @@ async def admin_provider_activity(limit: int = 50):
     capped = max(1, min(int(limit or 50), 200))
     rows = await db.provider_activity.find({}, {"_id": 0}).sort("created_at", -1).to_list(capped)
     return {"limit": capped, "count": len(rows), "items": rows}
+
+
+@api.get("/admin/provider-health")
+async def admin_provider_health(window_minutes: int = 60):
+    """Aggregated mock-mode health pulse for each modality over the last window.
+
+    Status rules:
+      no_activity → no calls in the window
+      failing    → failure rate ≥ 25%
+      slow       → avg duration > 3000 ms
+      healthy    → otherwise
+    """
+    window = max(1, min(int(window_minutes or 60), 1440))
+    cutoff_iso = (datetime.now(timezone.utc) - timedelta(minutes=window)).isoformat()
+    rows = await db.provider_activity.find(
+        {"created_at": {"$gte": cutoff_iso}},
+        {"_id": 0, "modality": 1, "status": 1, "duration_ms": 1},
+    ).to_list(10000)
+
+    out = []
+    for modality in PROVIDER_LAYER_MODALITIES:
+        bucket = [r for r in rows if r.get("modality") == modality]
+        total = len(bucket)
+        if total == 0:
+            out.append({
+                "modality": modality,
+                "total_calls": 0,
+                "success_calls": 0,
+                "failed_calls": 0,
+                "avg_duration_ms": 0,
+                "status": "no_activity",
+            })
+            continue
+        failed = sum(1 for r in bucket if r.get("status") == "failed")
+        success = sum(1 for r in bucket if r.get("status") == "success")
+        durations = [int(r.get("duration_ms") or 0) for r in bucket]
+        avg_ms = round(sum(durations) / len(durations)) if durations else 0
+        failure_rate = failed / total
+        if failure_rate >= 0.25:
+            status = "failing"
+        elif avg_ms > 3000:
+            status = "slow"
+        else:
+            status = "healthy"
+        out.append({
+            "modality": modality,
+            "total_calls": total,
+            "success_calls": success,
+            "failed_calls": failed,
+            "avg_duration_ms": avg_ms,
+            "status": status,
+        })
+    return {"window_minutes": window, "modalities": out}
 
 
 # ---------------------------------------------------------------------------

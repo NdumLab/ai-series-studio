@@ -342,3 +342,51 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 5 · voice 1
 - `frontend/src/pages/Admin.jsx` — new "Provider activity" tab + table.
 - `frontend/src/lib/api.js` — `Admin.providerActivity(limit)` helper.
 - `backend/tests/backend_test.py` — 4 new e2e cases appended.
+
+
+## Iteration 18 (2026-02) — Provider Health Pulse (Admin → Provider Activity)
+**Goal**: a lightweight rollup that turns the safe-metadata log from iteration 17 into an at-a-glance health view per modality. Still mock-only.
+
+### Backend
+- New endpoint `GET /api/admin/provider-health?window_minutes=60` (clamped 1–1440).
+- Aggregates `provider_activity` over the window per modality. Status rules:
+  - **no_activity** → `total_calls == 0`
+  - **failing** → `failed/total ≥ 0.25`
+  - **slow** → `avg_duration_ms > 3000`
+  - **healthy** → otherwise
+- Response is the exact shape the user specified:
+  ```json
+  { "window_minutes": 60, "modalities": [
+      {"modality":"llm","total_calls":8,"success_calls":8,"failed_calls":0,"avg_duration_ms":12,"status":"healthy"}, …
+  ]}
+  ```
+
+### Frontend
+- New compact `ProviderHealthPulse` strip rendered above the Provider Activity table on the Admin page. 6 chips in a responsive 2/3/6 grid: modality name, colored dot, status label (Healthy / Slow / Failing / No activity), `avg ms · N calls` line, red `· N failed` callout when applicable. `Refresh` button refreshes both pulse + activity together.
+- `Admin.providerHealth(windowMinutes=60)` helper added to `lib/api.js`.
+
+### Tests — **93/93 passing** (was 87, +6)
+Used pymongo directly to seed deterministic `provider_activity` rows tagged with `test-health-seed-*` ids, with a `clean_seed` fixture that purges them before and after each test. New tests:
+- `test_provider_health_all_modalities_listed` — all six modalities appear in the response in order.
+- `test_provider_health_no_activity_status` — modality with no calls in a 1-minute window → `no_activity`.
+- `test_provider_health_healthy_status` — 5 success @ 20 ms → `healthy`.
+- `test_provider_health_slow_status` — 4 success @ 5000 ms → `slow`.
+- `test_provider_health_failing_status` — 2 of 4 failed (50%) → `failing`.
+- `test_provider_health_no_secrets_in_response` — no `api_key|secret|bearer|sk-|password|token` substrings in JSON; per-modality entry keys are exactly the documented allowlist.
+
+### Mock-only invariants — re-verified
+- No new real-network code. `providers/` package still has zero http imports.
+- All `USE_REAL_*_PROVIDER` flags `false`. `key_present()` always `False`.
+- The pulse aggregates 100% mock-mode rows (every row has `mode="mock"`).
+
+### Files changed (4)
+- `backend/server.py` — `timedelta` import + `GET /api/admin/provider-health`.
+- `frontend/src/pages/Admin.jsx` — `ProviderHealthPulse` component + state + render above table.
+- `frontend/src/lib/api.js` — `Admin.providerHealth()` helper.
+- `backend/tests/backend_test.py` — `json` import + `_direct_db`, `_seed_activity`, `_purge_seed`, `clean_seed` fixture + 6 new test cases.
+
+### Decision deferred to next milestone
+- **Phase 2B real provider implementation is intentionally NOT started.** The next milestone is the **secrets storage design** (per the user's instruction). Options to evaluate before implementation:
+  1. Server-side encrypted secrets store with per-modality scoping (e.g. age/sops/sealed-box on disk, read-only at runtime).
+  2. Emergent-managed universal LLM key for LLM modality only (no additional infra).
+  3. Per-tenant KMS once auth/multi-tenant is added (P2 backlog).

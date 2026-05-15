@@ -15,11 +15,13 @@ export default function Admin() {
   const [gens, setGens] = useState([]);
   const [failed, setFailed] = useState([]);
   const [activity, setActivity] = useState({ items: [], count: 0 });
+  const [health, setHealth] = useState({ window_minutes: 60, modalities: [] });
 
   const loadActivity = () =>
     AdminApi.providerActivity(50).then((d) =>
       setActivity({ items: d.items || [], count: d.count || 0 })
     );
+  const loadHealth = () => AdminApi.providerHealth().then(setHealth);
 
   useEffect(() => {
     AdminApi.stats().then(setStats);
@@ -28,6 +30,7 @@ export default function Admin() {
     AdminApi.generations().then(setGens);
     AdminApi.failedJobs().then(setFailed);
     loadActivity();
+    loadHealth();
   }, []);
 
   return (
@@ -121,13 +124,23 @@ export default function Admin() {
         </TabsContent>
 
         <TabsContent value="provider-activity" className="mt-4">
-          <div className="flex items-center justify-between mb-2">
+          <ProviderHealthPulse
+            health={health}
+            onRefresh={() => {
+              loadHealth();
+              loadActivity();
+            }}
+          />
+          <div className="flex items-center justify-between mb-2 mt-4">
             <p className="text-xs text-[#A1A1AA]">
               Last 50 provider executions · safe metadata only · no prompts, outputs or API keys are stored.
             </p>
             <button
               type="button"
-              onClick={loadActivity}
+              onClick={() => {
+                loadHealth();
+                loadActivity();
+              }}
               data-testid="admin-provider-activity-refresh"
               className="text-xs px-3 py-1.5 rounded-md border border-white/15 text-white hover:bg-white/5"
             >
@@ -203,6 +216,91 @@ function Table({ head, rows, testId }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+
+const STATUS_DISPLAY = {
+  healthy:     { label: "Healthy",     color: "#34C759", dot: "#34C759" },
+  slow:        { label: "Slow",        color: "#FFCC00", dot: "#FFCC00" },
+  failing:     { label: "Failing",     color: "#FF3B30", dot: "#FF3B30" },
+  no_activity: { label: "No activity", color: "#A1A1AA", dot: "#52525B" },
+};
+
+const MODALITY_DISPLAY = {
+  llm:    "LLM",
+  image:  "Image",
+  video:  "Video",
+  voice:  "Voice",
+  music:  "Music",
+  export: "Export",
+};
+
+function ProviderHealthPulse({ health, onRefresh }) {
+  const modalities = (health && health.modalities) || [];
+  return (
+    <div
+      className="es-card p-4"
+      data-testid="provider-health-pulse"
+    >
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <p className="es-label">Provider health pulse</p>
+          <p className="text-xs text-[#A1A1AA] mt-0.5">
+            Aggregated from the last {health.window_minutes || 60} minutes of activity · mock mode only.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onRefresh}
+          data-testid="provider-health-refresh"
+          className="text-xs px-3 py-1.5 rounded-md border border-white/15 text-white hover:bg-white/5"
+        >
+          Refresh
+        </button>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+        {modalities.map((m) => {
+          const d = STATUS_DISPLAY[m.status] || STATUS_DISPLAY.no_activity;
+          const noActivity = m.status === "no_activity";
+          return (
+            <div
+              key={m.modality}
+              data-testid={`pulse-${m.modality}`}
+              data-status={m.status}
+              className="es-card p-2.5 bg-white/[0.02] border-white/5"
+              title={`${MODALITY_DISPLAY[m.modality]} · ${d.label} · avg ${m.avg_duration_ms}ms · ${m.total_calls} calls · ${m.failed_calls} failed`}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-mono uppercase tracking-widest text-white">
+                  {MODALITY_DISPLAY[m.modality] || m.modality}
+                </span>
+                <span
+                  className="w-1.5 h-1.5 rounded-full"
+                  style={{ backgroundColor: d.dot }}
+                />
+              </div>
+              <div className="font-mono text-[10px]" style={{ color: d.color }}>
+                {d.label}
+              </div>
+              <div className="font-mono text-[10px] text-[#A1A1AA] mt-1">
+                {noActivity ? (
+                  <>0 calls</>
+                ) : (
+                  <>
+                    {m.avg_duration_ms}ms · {m.total_calls} call
+                    {m.total_calls === 1 ? "" : "s"}
+                    {m.failed_calls > 0 && (
+                      <span className="text-[#FF3B30]"> · {m.failed_calls} failed</span>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

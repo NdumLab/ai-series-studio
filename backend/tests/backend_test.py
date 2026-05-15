@@ -1,4 +1,5 @@
 """End-to-end backend tests for AI Episode Studio MVP."""
+import json
 import os
 import time
 import pytest
@@ -1448,4 +1449,131 @@ def test_provider_activity_limit_capping(s):
     assert r.status_code == 200
     body = r.json()
     assert body["limit"] <= 200
+
+
+
+# ---------- Phase 2A.5 + provider health pulse ----------
+def _direct_db():
+    """Direct pymongo handle for seeding provider_activity in health tests.
+
+    Tests must clean up their seeded rows so they don't pollute neighbors.
+    """
+    from pymongo import MongoClient  # local import; only used in tests
+    from dotenv import load_dotenv as _ld
+    _ld("/app/backend/.env", override=True)
+    cli = MongoClient(os.environ["MONGO_URL"])
+    return cli[os.environ["DB_NAME"]]
+
+
+_HEALTH_SEED_TAG = "test-health-seed"
+
+
+def _seed_activity(modality, *, total, failed, avg_duration_ms, age_minutes=5):
+    """Insert N synthetic activity rows for one modality, tagged for cleanup."""
+    from datetime import datetime, timezone, timedelta
+    db = _direct_db()
+    when = (datetime.now(timezone.utc) - timedelta(minutes=age_minutes)).isoformat()
+    docs = []
+    for i in range(total):
+        status = "failed" if i < failed else "success"
+        docs.append({
+            "id": f"{_HEALTH_SEED_TAG}-{modality}-{i}",
+            "created_at": when,
+            "modality": modality,
+            "provider_name": f"mock-{modality}",
+            "model_name": "mock-model",
+            "source": "global",
+            "mode": "mock",
+            "status": status,
+            "estimated_credits": 0,
+            "provider_job_id": None,
+            "message": "test",
+            "error": "synthetic failure" if status == "failed" else None,
+            "duration_ms": int(avg_duration_ms),
+            "project_id": None,
+            "scene_id": None,
+            "segment_id": None,
+            "feature_flag_enabled": False,
+            "key_present": False,
+        })
+    if docs:
+        db.provider_activity.insert_many(docs)
+
+
+def _purge_seed():
+    db = _direct_db()
+    db.provider_activity.delete_many({"id": {"$regex": f"^{_HEALTH_SEED_TAG}-"}})
+
+
+@pytest.fixture
+def clean_seed():
+    _purge_seed()
+    yield
+    _purge_seed()
+
+
+def test_provider_health_all_modalities_listed(s, clean_seed):
+    r = s.get(f"{API}/admin/provider-health")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["window_minutes"] == 60
+    mods = {m["modality"] for m in body["modalities"]}
+    assert mods == {"llm", "image", "video", "voice", "music", "export"}
+
+
+def test_provider_health_no_activity_status(s, clean_seed):
+    """Use a tiny window so the existing background activity doesn't count."""
+    r = s.get(f"{API}/admin/provider-health?window_minutes=1")
+    body = r.json()
+    # Pick a modality with no recent activity (music). Even if some other test
+    # races by, we don't seed music here so it should still be no_activity in
+    # the 1-minute window when we haven't generated music in that window.
+    music = next(m for m in body["modalities"] if m["modality"] == "music")
+    assert music["status"] == "no_activity"
+    assert music["total_calls"] == 0
+
+
+def test_provider_health_healthy_status(s, clean_seed):
+    _seed_activity("voice", total=5, failed=0, avg_duration_ms=20, age_minutes=2)
+    body = s.get(f"{API}/admin/provider-health?window_minutes=10").json()
+    voice = next(m for m in body["modalities"] if m["modality"] == "voice")
+    assert voice["total_calls"] >= 5
+    assert voice["failed_calls"] == 0
+    assert voice["avg_duration_ms"] <= 100  # well under the 3000ms slow threshold
+    assert voice["status"] == "healthy"
+
+
+def test_provider_health_slow_status(s, clean_seed):
+    _seed_activity("music", total=4, failed=0, avg_duration_ms=5000, age_minutes=2)
+    body = s.get(f"{API}/admin/provider-health?window_minutes=10").json()
+    music = next(m for m in body["modalities"] if m["modality"] == "music")
+    assert music["total_calls"] >= 4
+    assert music["failed_calls"] == 0
+    assert music["avg_duration_ms"] >= 3001
+    assert music["status"] == "slow"
+
+
+def test_provider_health_failing_status(s, clean_seed):
+    # 2 failed of 4 = 50% failure rate → failing
+    _seed_activity("export", total=4, failed=2, avg_duration_ms=10, age_minutes=2)
+    body = s.get(f"{API}/admin/provider-health?window_minutes=10").json()
+    export = next(m for m in body["modalities"] if m["modality"] == "export")
+    assert export["total_calls"] >= 4
+    assert export["failed_calls"] >= 2
+    assert export["status"] == "failing"
+
+
+def test_provider_health_no_secrets_in_response(s, clean_seed):
+    body = s.get(f"{API}/admin/provider-health").json()
+    # Whole response, recursively serialized, must not contain any secret-like keys/values.
+    blob = json.dumps(body).lower()
+    for needle in ("api_key", "secret", "bearer ", "sk-", "password", "token"):
+        assert needle not in blob, f"secret-like substring '{needle}' leaked"
+    # Each modality entry has the documented allowlist only.
+    allowed = {
+        "modality", "total_calls", "success_calls", "failed_calls",
+        "avg_duration_ms", "status",
+    }
+    for m in body["modalities"]:
+        assert set(m.keys()) == allowed
 
