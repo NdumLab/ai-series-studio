@@ -161,3 +161,20 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 5 · voice 1
   - Threshold value flows via the backend response (`high_cost_scene_threshold_percent`) — never hard-coded in the UI; changing the env var updates everything.
 - Tests: 45/45 backend pass. Added: `test_studio_config_endpoint`, `test_scene_costs_includes_wallet_pct_and_state`, `test_wallet_state_thresholds` (covers normal/warning/high/insufficient via query override incl. >100%), `test_high_cost_scene_flag_with_configurable_threshold` (default 25%, plus overrides 10% / 50%), `test_scene_costs_404_still_works_for_wallet`. Mock mode and feature flags still asserted False.
 - Mock-only invariants preserved.
+
+## Iteration 10 (2026-02) — Dashboard wallet rings + Cost-badge trend arrow
+- Backend `GET /api/projects` now embeds a `cost_summary` per project: `{grand_total_credits, wallet_credits, wallet_pct, wallet_state, estimate_unavailable}`. Helper `_project_cost_summary` reuses the same formula as `/scene-costs`.
+- Dashboard project cards show a small `MiniWalletRing` with the line `~N credits · X% of wallet`, color-coded by state, and an `AlertCircle` icon when `wallet_state === "insufficient"`. Falls back to "Estimate unavailable" when the summary is missing/incomplete. Tooltip mirrors the spec: _"This draft would use about X% of your available 250 credits."_
+- ProjectStudio Cost badge gains a temporary trend chip:
+  - On any cost-changing mutation, `loadSceneCosts({trackDelta:true})` compares old vs new `grand_total_credits` and pushes `{value, key}` into a `costDelta` state.
+  - The badge renders `↑ +N` (orange) or `↓ -N` (green) next to the total, animated by a 1.5s CSS pulse (`@keyframes es-trend-pulse`), then auto-clears.
+  - Triggered by every mutation already wired to `reloadAll`: add/delete/update scene, generate/expand/regenerate/**delete** segment.
+- Added a small trash button on each `SegmentCard` so segment deletion is reachable from the UI (matching the new spec trigger). Reuses the existing `DELETE /api/segments/{id}` route.
+- Tests: 51/51 backend cases pass. Added 6 new cases:
+  - `test_list_projects_includes_cost_summary` (default 6-scene 90-credit project ⇒ 36% normal)
+  - `test_dashboard_summary_handles_insufficient_state` (drives total > 250 via expansions)
+  - `test_trend_increase_on_expand` (delta exactly +12 = video_segment cost)
+  - `test_trend_decrease_on_segment_delete` (delta exactly −12)
+  - `test_trend_decrease_on_scene_delete` (delta exactly −15 = full default scene cost)
+  - `test_dashboard_estimate_unavailable_when_costs_missing` (schema contract for the field)
+- Mock-only invariants preserved.

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Plus, Film, Clock, ChevronRight, Sparkles } from "lucide-react";
+import { Plus, Film, Clock, ChevronRight, Sparkles, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -21,6 +21,66 @@ const STATUS_LABEL = {
   story_ready: "Story",
   scenes_ready: "Scenes",
 };
+
+const WALLET_STATE_COLOR = {
+  normal: "#34C759",
+  warning: "#FFCC00",
+  high: "#FF9500",
+  insufficient: "#FF3B30",
+};
+
+function MiniWalletRing({ summary }) {
+  if (!summary || summary.estimate_unavailable) {
+    return (
+      <span
+        className="text-[10px] font-mono text-[#A1A1AA]"
+        data-testid="dash-card-estimate-unavailable"
+      >
+        Estimate unavailable
+      </span>
+    );
+  }
+  const radius = 11;
+  const stroke = 3;
+  const c = 2 * Math.PI * radius;
+  const pct = summary.wallet_pct ?? 0;
+  const clamped = Math.max(0, Math.min(100, pct));
+  const dash = (clamped / 100) * c;
+  const color = WALLET_STATE_COLOR[summary.wallet_state] || WALLET_STATE_COLOR.normal;
+  const tooltip = `This draft would use about ${Math.round(pct)}% of your available ${summary.wallet_credits} credits.`;
+  return (
+    <span
+      className="inline-flex items-center gap-1.5"
+      title={tooltip}
+      data-testid="dash-card-wallet-ring"
+      data-state={summary.wallet_state}
+    >
+      <svg width="28" height="28" viewBox="0 0 28 28" className="rotate-[-90deg]">
+        <circle cx="14" cy="14" r={radius} stroke="rgba(255,255,255,0.08)" strokeWidth={stroke} fill="none" />
+        <circle
+          cx="14"
+          cy="14"
+          r={radius}
+          stroke={color}
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          fill="none"
+          strokeDasharray={`${dash} ${c}`}
+        />
+      </svg>
+      <span
+        className="text-[11px] font-mono"
+        style={{ color }}
+        data-testid="dash-card-wallet-text"
+      >
+        ~{summary.grand_total_credits} credits · {Math.round(pct)}% of wallet
+      </span>
+      {summary.wallet_state === "insufficient" && (
+        <AlertCircle className="w-3 h-3 text-[#FF3B30]" />
+      )}
+    </span>
+  );
+}
 
 export default function Dashboard() {
   const [projects, setProjects] = useState([]);
@@ -180,6 +240,9 @@ export default function Dashboard() {
                 <p className="text-sm text-[#A1A1AA] line-clamp-3 min-h-[60px]">
                   {p.idea || "No idea yet — open the project to add one."}
                 </p>
+                <div className="mt-3">
+                  <MiniWalletRing summary={p.cost_summary} />
+                </div>
                 <div className="mt-4 pt-4 border-t border-white/10 flex items-center justify-between text-xs text-[#A1A1AA]">
                   <span className="font-mono">{p.id.slice(0, 8)}</span>
                   <span>{new Date(p.created_at).toLocaleDateString()}</span>

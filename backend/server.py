@@ -741,10 +741,37 @@ async def create_project(body: ProjectCreate):
     return doc
 
 
+async def _project_cost_summary(project_id: str, cfg: dict) -> dict:
+    image_cost = COSTS.get("image")
+    seg_cost = COSTS.get("video_segment")
+    voice_cost = COSTS.get("voice")
+    wallet_credits = cfg["wallet_credits"]
+    missing = image_cost is None or seg_cost is None or voice_cost is None
+
+    scenes = await db.scenes.find({"project_id": project_id}, {"_id": 0, "id": 1}).to_list(500)
+    total = 0
+    for sc in scenes:
+        seg_count = await db.segments.count_documents({"scene_id": sc["id"]})
+        planned = max(1, seg_count)
+        total += (image_cost or 0) + (seg_cost or 0) * planned + (voice_cost or 0)
+
+    pct_raw = (total / wallet_credits * 100.0) if wallet_credits else 0.0
+    return {
+        "grand_total_credits": total,
+        "wallet_credits": wallet_credits,
+        "wallet_pct": round(pct_raw, 1),
+        "wallet_state": _wallet_state(pct_raw),
+        "estimate_unavailable": missing,
+    }
+
+
 @api.get("/projects")
 async def list_projects():
-    cursor = db.projects.find({}, {"_id": 0}).sort("created_at", -1)
-    return await cursor.to_list(500)
+    cfg = studio_config()
+    projects = await db.projects.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    for p in projects:
+        p["cost_summary"] = await _project_cost_summary(p["id"], cfg)
+    return projects
 
 
 @api.get("/projects/{project_id}")

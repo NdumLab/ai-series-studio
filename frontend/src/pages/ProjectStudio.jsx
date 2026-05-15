@@ -77,6 +77,7 @@ export default function ProjectStudio() {
   const [providers, setProviders] = useState(null);
   const [voiceRes, setVoiceRes] = useState(null);
   const [sceneCosts, setSceneCosts] = useState({ status: "idle", data: null });
+  const [costDelta, setCostDelta] = useState(null); // { value, key }
   const [options, setOptions] = useState({ voices: [], music_moods: [], costs: {} });
   const [tab, setTab] = useState("story");
 
@@ -89,17 +90,39 @@ export default function ProjectStudio() {
     () => ProjectProviders.voiceResolution(id).then(setVoiceRes),
     [id]
   );
-  const loadSceneCosts = useCallback(() => {
-    setSceneCosts((p) => ({ ...p, status: "loading" }));
-    return Projects.sceneCosts(id)
-      .then((d) => setSceneCosts({ status: "ok", data: d }))
-      .catch(() => setSceneCosts({ status: "error", data: null }));
-  }, [id]);
+  const loadSceneCosts = useCallback(
+    ({ trackDelta = false } = {}) => {
+      setSceneCosts((p) => {
+        return { ...p, status: "loading" };
+      });
+      const prevTotal =
+        sceneCosts.status === "ok" ? sceneCosts.data?.grand_total_credits : null;
+      return Projects.sceneCosts(id)
+        .then((d) => {
+          setSceneCosts({ status: "ok", data: d });
+          if (trackDelta && prevTotal != null) {
+            const delta = d.grand_total_credits - prevTotal;
+            if (delta !== 0) {
+              setCostDelta({ value: delta, key: Date.now() });
+            }
+          }
+        })
+        .catch(() => setSceneCosts({ status: "error", data: null }));
+    },
+    [id, sceneCosts]
+  );
+
+  // Auto-fade the delta after 1.5s
+  useEffect(() => {
+    if (!costDelta) return;
+    const t = setTimeout(() => setCostDelta(null), 1500);
+    return () => clearTimeout(t);
+  }, [costDelta]);
 
   const reloadAll = useCallback(() => {
     load();
     loadVoiceRes();
-    loadSceneCosts();
+    loadSceneCosts({ trackDelta: true });
   }, [load, loadVoiceRes, loadSceneCosts]);
 
   useEffect(() => {
@@ -108,7 +131,8 @@ export default function ProjectStudio() {
     loadVoiceRes();
     loadSceneCosts();
     Meta.options().then(setOptions);
-  }, [load, loadProviders, loadVoiceRes, loadSceneCosts]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   if (!data) return <div className="text-[#A1A1AA] text-sm">Loading project…</div>;
   const { project, scenes, characters } = data;
@@ -145,7 +169,7 @@ export default function ProjectStudio() {
           >
             <SettingsIcon className="w-4 h-4 mr-1.5" /> Providers
           </Button>
-          <CostBadge sceneCosts={sceneCosts} />
+          <CostBadge sceneCosts={sceneCosts} delta={costDelta} />
         </div>
       </div>
 
@@ -342,7 +366,7 @@ function WalletRing({ pct, state, walletCredits, totalCredits }) {
   );
 }
 
-function CostBadge({ sceneCosts }) {
+function CostBadge({ sceneCosts, delta }) {
   let body;
   let ring = null;
   if (sceneCosts.status === "loading" && !sceneCosts.data) {
@@ -362,10 +386,26 @@ function CostBadge({ sceneCosts }) {
     const total = d?.grand_total_credits ?? 0;
     const pct = d?.wallet_pct ?? 0;
     const wallet = d?.wallet_credits ?? 0;
+    const showDelta = !!delta && delta.value !== 0;
+    const deltaUp = showDelta && delta.value > 0;
     body = (
       <div data-testid="cost-badge-total">
-        <div className="font-display text-lg font-bold leading-tight">
-          ~{total} <span className="text-xs text-[#A1A1AA] font-mono">credits</span>
+        <div className="font-display text-lg font-bold leading-tight inline-flex items-center gap-2">
+          <span>
+            ~{total} <span className="text-xs text-[#A1A1AA] font-mono">credits</span>
+          </span>
+          {showDelta && (
+            <span
+              key={delta.key}
+              data-testid="cost-trend"
+              data-direction={deltaUp ? "up" : "down"}
+              className="es-trend text-[11px] font-mono inline-flex items-center"
+              style={{ color: deltaUp ? "#FF9500" : "#34C759" }}
+            >
+              {deltaUp ? "↑" : "↓"} {deltaUp ? "+" : ""}
+              {delta.value}
+            </span>
+          )}
         </div>
         {wallet ? (
           <div
@@ -1077,6 +1117,16 @@ function SegmentCard({ segment, index, parent, reload }) {
       setBusy(false);
     }
   };
+  const removeSeg = async () => {
+    setBusy(true);
+    try {
+      await Segments.remove(segment.id);
+      toast.success("Segment deleted");
+      reload();
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const statusColor =
     segment.status === "approved"
@@ -1134,7 +1184,7 @@ function SegmentCard({ segment, index, parent, reload }) {
         </p>
       )}
 
-      <div className="grid grid-cols-3 gap-1.5">
+      <div className="grid grid-cols-4 gap-1.5">
         <Button
           size="sm"
           disabled={busy}
@@ -1162,6 +1212,16 @@ function SegmentCard({ segment, index, parent, reload }) {
           className="border-white/15 bg-transparent text-white hover:bg-white/10 hover:text-white h-8"
         >
           <RefreshCw className="w-3.5 h-3.5" />
+        </Button>
+        <Button
+          size="sm"
+          disabled={busy}
+          onClick={removeSeg}
+          variant="outline"
+          data-testid={`delete-segment-${segment.id}`}
+          className="border-white/15 bg-transparent text-[#A1A1AA] hover:bg-[#FF3B30]/15 hover:text-[#FF3B30] hover:border-[#FF3B30]/30 h-8"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
         </Button>
       </div>
     </div>
