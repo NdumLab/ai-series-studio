@@ -108,6 +108,35 @@ PROVIDER_CATALOG = {
 
 PROVIDER_MODALITIES = list(PROVIDER_CATALOG.keys())
 
+# Per-modality "model field" name on a project. Spec uses `export_mode` instead of
+# `export_model` for the export modality, so the mapping is explicit.
+PROJECT_FIELD_MAP = {
+    "llm":    {"provider": "llm_provider",    "model": "llm_model"},
+    "image":  {"provider": "image_provider",  "model": "image_model"},
+    "video":  {"provider": "video_provider",  "model": "video_model"},
+    "voice":  {"provider": "voice_provider",  "model": "voice_model"},
+    "music":  {"provider": "music_provider",  "model": "music_model"},
+    "export": {"provider": "export_provider", "model": "export_mode"},
+}
+
+FEATURE_FLAG_KEYS = {
+    "llm":    "USE_REAL_LLM_PROVIDER",
+    "image":  "USE_REAL_IMAGE_PROVIDER",
+    "video":  "USE_REAL_VIDEO_PROVIDER",
+    "voice":  "USE_REAL_VOICE_PROVIDER",
+    "music":  "USE_REAL_MUSIC_PROVIDER",
+    "export": "USE_REAL_EXPORT_PROVIDER",
+}
+
+
+def feature_flags() -> dict:
+    """Read USE_REAL_*_PROVIDER flags from env. Anything not 'true' is False."""
+    out = {}
+    for modality, env_key in FEATURE_FLAG_KEYS.items():
+        out[modality] = os.environ.get(env_key, "false").strip().lower() == "true"
+    out["any_real"] = any(out.values())
+    return out
+
 DEFAULT_PROVIDER_SETTINGS = {
     "llm": {"provider": "openai", "model": "gpt-5.2", "custom_provider": "", "custom_model": ""},
     "image": {"provider": "fal", "model": "flux-pro", "custom_provider": "", "custom_model": ""},
@@ -374,6 +403,133 @@ async def me():
     return await db.users.find_one({"id": DEFAULT_USER_ID}, {"_id": 0})
 
 
+@api.get("/feature-flags")
+async def get_feature_flags():
+    """Real-provider feature flags. All false until backend is wired to live providers."""
+    return feature_flags()
+
+
+# ---------------------------------------------------------------------------
+# Project provider override (per-project, mock-only)
+# ---------------------------------------------------------------------------
+class ProjectProvidersUpdate(BaseModel):
+    provider_override_enabled: Optional[bool] = None
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
+    image_provider: Optional[str] = None
+    image_model: Optional[str] = None
+    video_provider: Optional[str] = None
+    video_model: Optional[str] = None
+    voice_provider: Optional[str] = None
+    voice_model: Optional[str] = None
+    music_provider: Optional[str] = None
+    music_model: Optional[str] = None
+    export_provider: Optional[str] = None
+    export_mode: Optional[str] = None
+
+
+def _project_modality_view(project: dict, modality: str, source_label: str) -> dict:
+    fmap = PROJECT_FIELD_MAP[modality]
+    return {
+        "provider": project.get(fmap["provider"], "") or "",
+        "model": project.get(fmap["model"], "") or "",
+        "source": source_label,
+    }
+
+
+def _global_modality_view(global_settings: dict, modality: str) -> dict:
+    cfg = global_settings.get(modality, {}) or {}
+    return {
+        "provider": cfg.get("provider", "") or "",
+        "model": cfg.get("model", "") or "",
+        "custom_provider": cfg.get("custom_provider", "") or "",
+        "custom_model": cfg.get("custom_model", "") or "",
+        "source": "global",
+    }
+
+
+async def _build_effective_providers(project: dict) -> dict:
+    """Returns the effective config that *would* be used for each modality.
+    When override is off → values come from global. When on → from the project."""
+    global_settings = await _load_provider_settings()
+    override_on = bool(project.get("provider_override_enabled"))
+    effective: dict = {}
+    for modality in PROVIDER_MODALITIES:
+        if override_on:
+            view = _project_modality_view(project, modality, "project")
+            # Fall back to global value if the project didn't choose one yet.
+            if not view["provider"]:
+                view = _global_modality_view(global_settings, modality)
+                view["source"] = "global-fallback"
+        else:
+            view = _global_modality_view(global_settings, modality)
+        effective[modality] = view
+    return effective
+
+
+@api.get("/projects/{project_id}/providers")
+async def get_project_providers(project_id: str):
+    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    effective = await _build_effective_providers(proj)
+    project_view = {
+        modality: _project_modality_view(proj, modality, "project")
+        for modality in PROVIDER_MODALITIES
+    }
+    return {
+        "project_id": project_id,
+        "provider_override_enabled": bool(proj.get("provider_override_enabled")),
+        "feature_flags": feature_flags(),
+        "mock_mode": True,
+        "project": project_view,
+        "effective": effective,
+    }
+
+
+@api.put("/projects/{project_id}/providers")
+async def update_project_providers(project_id: str, body: ProjectProvidersUpdate):
+    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    payload = body.model_dump(exclude_none=True)
+
+    # Validate any provided provider id against the catalog (empty string clears it)
+    for modality, fmap in PROJECT_FIELD_MAP.items():
+        prov_field = fmap["provider"]
+        if prov_field in payload and payload[prov_field]:
+            valid = {p["id"] for p in PROVIDER_CATALOG[modality]}
+            if payload[prov_field] not in valid:
+                raise HTTPException(400, f"Unknown {modality} provider: {payload[prov_field]}")
+
+    payload["updated_at"] = now_iso()
+    await db.projects.update_one({"id": project_id}, {"$set": payload})
+    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    return await get_project_providers(project_id)  # noqa: E501  (reuse the merged view)
+
+
+@api.post("/projects/{project_id}/providers/test")
+async def test_project_provider(project_id: str, body: ProviderTestRequest):
+    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    effective = await _build_effective_providers(proj)
+    cfg = effective.get(body.modality, {})
+    flags = feature_flags()
+    return {
+        "project_id": project_id,
+        "modality": body.modality,
+        "provider": cfg.get("provider"),
+        "model": cfg.get("model"),
+        "source": cfg.get("source"),
+        "ok": True,
+        "mock_mode": True,
+        "real_provider_enabled": flags.get(body.modality, False),
+        "message": "Mock mode active — no real provider call was made.",
+    }
+
+
+
 # ---------------------------------------------------------------------------
 # Projects
 # ---------------------------------------------------------------------------
@@ -387,6 +543,20 @@ async def create_project(body: ProjectCreate):
         "idea": body.idea,
         "rewritten_story": "",
         "status": "draft",
+        # Per-project provider override (off by default → uses global settings)
+        "provider_override_enabled": False,
+        "llm_provider": "",
+        "llm_model": "",
+        "image_provider": "",
+        "image_model": "",
+        "video_provider": "",
+        "video_model": "",
+        "voice_provider": "",
+        "voice_model": "",
+        "music_provider": "",
+        "music_model": "",
+        "export_provider": "",
+        "export_mode": "",
         "created_at": now_iso(),
         "updated_at": now_iso(),
     }

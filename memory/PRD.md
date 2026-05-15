@@ -68,3 +68,30 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 5 · voice 1
   - POST /api/settings/providers/test — always returns "Mock mode active — real provider call skipped."
 - Tests: 22/22 passing (added 4 cases: options shape, get/update round-trip + custom provider, unknown-provider 400, mocked test endpoint).
 - No keys stored, no real APIs touched.
+
+## Iteration 4 (2026-02) — Per-project provider override (mock-only)
+- Backend `.env` gains 6 feature flags (all `false`): USE_REAL_LLM_PROVIDER, USE_REAL_IMAGE_PROVIDER, USE_REAL_VIDEO_PROVIDER, USE_REAL_VOICE_PROVIDER, USE_REAL_MUSIC_PROVIDER, USE_REAL_EXPORT_PROVIDER. Exposed via `GET /api/feature-flags`.
+- Project documents gain 13 fields:
+  - `provider_override_enabled` (bool, default false)
+  - `llm_provider`, `llm_model`
+  - `image_provider`, `image_model`
+  - `video_provider`, `video_model`
+  - `voice_provider`, `voice_model`
+  - `music_provider`, `music_model`
+  - `export_provider`, `export_mode` (note: export uses `export_mode`, not `export_model`)
+- New endpoints:
+  - `GET /api/projects/{id}/providers` — returns project view + merged effective config (override_on → project, otherwise global). Empty project field falls back to global ("global-fallback" source).
+  - `PUT /api/projects/{id}/providers` — accepts any subset of the new fields; validates provider id against catalog (400 on unknown).
+  - `POST /api/projects/{id}/providers/test` — always mocked: `"Mock mode active — no real provider call was made."`
+- Frontend ProjectStudio:
+  - 8th tab "Providers" appended to the tab row (with gear icon). Workflow strip stays Step N **of 7** (Providers is config, not creative).
+  - Small "⚙ Providers" shortcut button placed beside the Cost badge in the project header.
+  - Inside the Providers tab:
+    - Header source badge — "Configured from global defaults" (gray) ⇄ "Project override active" (red).
+    - Toggle: "Use global defaults" / "Override for this project".
+    - Yellow flag chips for each USE_REAL_*_PROVIDER (all show "off").
+    - Disabled "API key management" placeholder banner — "API key management will be enabled when real provider mode is activated."
+    - When override OFF: read-only "Effective" cards showing what would be used from global, each with a mocked Test button.
+    - When override ON: editable provider+model selects per modality with a "Test" button each, plus a Save button. Empty fields fall back to global at runtime.
+- Tests: 29/29 passing. Added 7 cases — feature flags all false; new project includes all override fields; default get returns global; override round-trip incl. export_mode; unknown provider 400; mocked test endpoint; existing rewrite/split/scenes/segment/export pipeline still works with override enabled.
+- No real APIs added; no API keys collected or stored.

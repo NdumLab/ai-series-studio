@@ -54,6 +54,21 @@ export const ProviderSettings = {
     api.post("/settings/providers/test", { modality }).then((r) => r.data),
 };
 
+export const FeatureFlags = {
+  get: () => api.get("/feature-flags").then((r) => r.data),
+};
+
+export const ProjectProviders = {
+  get: (projectId) =>
+    api.get(`/projects/${projectId}/providers`).then((r) => r.data),
+  update: (projectId, payload) =>
+    api.put(`/projects/${projectId}/providers`, payload).then((r) => r.data),
+  test: (projectId, modality) =>
+    api
+      .post(`/projects/${projectId}/providers/test`, { modality })
+      .then((r) => r.data),
+};
+
 export const Admin = {
   stats: () => api.get("/admin/stats").then((r) => r.data),
   users: () => api.get("/admin/users").then((r) => r.data),

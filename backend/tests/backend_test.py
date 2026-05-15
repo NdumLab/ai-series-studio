@@ -304,3 +304,133 @@ def test_provider_test_connection_is_mocked(s):
     assert d["ok"] is True
     assert "Mock mode" in d["message"]
     assert d["modality"] == "voice"
+
+
+# ---------- Feature flags ----------
+def test_feature_flags_all_false(s):
+    r = s.get(f"{API}/feature-flags")
+    assert r.status_code == 200
+    flags = r.json()
+    for m in ("llm", "image", "video", "voice", "music", "export"):
+        assert flags[m] is False, f"{m} flag should be false"
+    assert flags["any_real"] is False
+
+
+# ---------- Per-project provider override ----------
+def test_project_creation_has_override_fields(s):
+    r = s.post(f"{API}/projects", json={"title": "TEST_ProvProj", "idea": "x"})
+    assert r.status_code == 200
+    p = r.json()
+    assert p["provider_override_enabled"] is False
+    for f in (
+        "llm_provider", "llm_model",
+        "image_provider", "image_model",
+        "video_provider", "video_model",
+        "voice_provider", "voice_model",
+        "music_provider", "music_model",
+        "export_provider", "export_mode",
+    ):
+        assert f in p, f"missing field {f}"
+    s.delete(f"{API}/projects/{p['id']}")
+
+
+def test_get_project_providers_defaults_to_global(s, project_id):
+    r = s.get(f"{API}/projects/{project_id}/providers")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["mock_mode"] is True
+    assert d["provider_override_enabled"] is False
+    # All effective entries pull from global
+    for m in ("llm", "image", "video", "voice", "music", "export"):
+        assert d["effective"][m]["source"] == "global"
+        assert d["effective"][m]["provider"]
+
+
+def test_project_provider_override_round_trip(s):
+    # Use an isolated project so the session-scoped one stays clean
+    p = s.post(f"{API}/projects", json={"title": "TEST_OvProj", "idea": "x"}).json()
+    pid = p["id"]
+    try:
+        r = s.put(
+            f"{API}/projects/{pid}/providers",
+            json={
+                "provider_override_enabled": True,
+                "image_provider": "openai-image",
+                "image_model": "gpt-image-1",
+                "video_provider": "runway",
+                "video_model": "gen-4.5",
+                "export_provider": "aws-mediaconvert",
+                "export_mode": "default",
+            },
+        )
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["provider_override_enabled"] is True
+        # project view captures the new selections
+        assert d["project"]["image"]["provider"] == "openai-image"
+        assert d["project"]["video"]["provider"] == "runway"
+        assert d["project"]["export"]["provider"] == "aws-mediaconvert"
+        assert d["project"]["export"]["model"] == "default"  # export_mode round-trips
+        # effective merges: image/video/export from project, others from global-fallback
+        assert d["effective"]["image"]["source"] == "project"
+        assert d["effective"]["video"]["source"] == "project"
+        assert d["effective"]["export"]["source"] == "project"
+        assert d["effective"]["llm"]["source"] == "global-fallback"
+        assert d["effective"]["voice"]["source"] == "global-fallback"
+        assert d["effective"]["music"]["source"] == "global-fallback"
+
+        # mock_mode always true; flags all false
+        assert d["mock_mode"] is True
+        for m in ("llm", "image", "video", "voice", "music", "export"):
+            assert d["feature_flags"][m] is False
+    finally:
+        s.delete(f"{API}/projects/{pid}")
+
+
+def test_project_provider_rejects_unknown(s, project_id):
+    r = s.put(
+        f"{API}/projects/{project_id}/providers",
+        json={"image_provider": "totally-not-real"},
+    )
+    assert r.status_code == 400
+
+
+def test_project_provider_test_endpoint_is_mocked(s, project_id):
+    r = s.post(
+        f"{API}/projects/{project_id}/providers/test",
+        json={"modality": "image"},
+    )
+    assert r.status_code == 200
+    d = r.json()
+    assert d["mock_mode"] is True
+    assert d["ok"] is True
+    assert d["real_provider_enabled"] is False
+    assert "Mock mode" in d["message"]
+
+
+def test_existing_routes_still_work_with_override(s):
+    """Smoke test: enable override on a project, then run rewrite/split/segment/export."""
+    p = s.post(f"{API}/projects", json={"title": "TEST_Smoke", "idea": "neon city"}).json()
+    pid = p["id"]
+    try:
+        # Enable override + pick non-default selections
+        s.put(
+            f"{API}/projects/{pid}/providers",
+            json={
+                "provider_override_enabled": True,
+                "image_provider": "fal", "image_model": "flux-pro",
+                "video_provider": "sora-2", "video_model": "sora-2",
+            },
+        )
+        # Existing creative pipeline still functions on mocks
+        assert s.post(f"{API}/projects/{pid}/rewrite").status_code == 200
+        assert s.post(f"{API}/projects/{pid}/split-scenes").status_code == 200
+        scenes = s.get(f"{API}/projects/{pid}").json()["scenes"]
+        sid = scenes[0]["id"]
+        assert _retry(lambda: s.post(f"{API}/scenes/{sid}/generate-image")).status_code == 200
+        seg = _retry(lambda: s.post(f"{API}/scenes/{sid}/segments")).json()
+        s.put(f"{API}/segments/{seg['id']}/status", json={"status": "approved"})
+        exp = s.get(f"{API}/projects/{pid}/export").json()
+        assert exp["ready"] is True
+    finally:
+        s.delete(f"{API}/projects/{pid}")
