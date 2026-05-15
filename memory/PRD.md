@@ -204,3 +204,34 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 5 · voice 1
   - `test_segment_reorder_rejects_foreign` (foreign-scene segment 400, empty list 400)
   - `test_existing_expand_and_costs_still_work_after_reorder` (post-reorder, expand chains parent_segment_id correctly + scene-costs reflects 2 segments → 27 credits)
 - Mock-only invariants preserved; all 6 `USE_REAL_*_PROVIDER` flags still false; no API key fields.
+
+
+## Iteration 13 (2026-02) — Optimistic drag verification + ProjectStudio refactor
+- **Optimistic drag-and-drop verified end-to-end** (testing agent iteration_2):
+  - Scene drag: DOM updates immediately on drop, persists across reload, no snap-back.
+  - Segment drag: optimistic reorder recomputes `start_second` cumulatively before the API resolves; matches backend formula; persists after reload.
+  - Failure path: server rejection restores previous snapshot + shows `Reorder failed — restored` toast.
+- **Bug fix**: `SceneSegmentBlock` previously did not destructure `setData` from props, silently neutering the segment optimistic update. Fixed during refactor in `VideoSegmentsTab.jsx`.
+- **Refactor — `ProjectStudio.jsx` split** (behavior unchanged):
+  - Before: monolithic ~2285-line file containing all 7 tabs + 14 helper components.
+  - After: ~225-line orchestrator that owns shared state (`data`, `providers`, `voiceRes`, `sceneCosts`, `options`, `tab`) and delegates each tab.
+  - New files under `/app/frontend/src/pages/tabs/`: `StoryTab.jsx`, `ScenesTab.jsx`, `CharactersTab.jsx`, `ImagesTab.jsx`, `VideoSegmentsTab.jsx`, `VoiceMusicTab.jsx`, `ExportTab.jsx`, `ProvidersTab.jsx`.
+  - New shared components under `/app/frontend/src/components/studio/`: `StageProgress.jsx`, `WalletRing.jsx`, `CostBadge.jsx`, `ProviderHintChip.jsx`, `SceneCard.jsx`, `SegmentCard.jsx`, `SceneCostWidget.jsx`, `FieldInput.jsx`, `InfoCallout.jsx`, `EmptyState.jsx`, `constants.js`.
+- **Verification**:
+  - Backend: 59/59 pytest cases pass (unchanged).
+  - Frontend: production build OK (178.62 kB gzip), ESLint clean, all 8 tabs render with zero console errors (testing agent iteration_2).
+- **Character drag handles** officially **backlogged** (P1) per user — no scope creep this iteration.
+- Mock-only invariants preserved; no real provider wiring, no API key fields, no Stripe.
+
+## Backlog (P1) — refreshed
+- Character drag handles in Cast view (deferred from iteration 12; requires `order` field on Character model + `PUT /api/projects/{id}/characters/reorder`).
+- Cascade-delete segments when their parent project is deleted (`server.py` `delete_project` carry-over).
+- Real provider plug-ins behind feature flags: LLM, image, video, voice, music, export.
+- API key inputs + storage (locked until real-provider mode is activated).
+
+## Backlog (P2)
+- Stripe metering + real credit purchases (replaces 250-credit mock wallet).
+- Authentication (Emergent Google login or JWT).
+- Public project sharing with watermark.
+- Multi-tenant teams with role-based admin.
+- Versioned scene revisions / undo.
