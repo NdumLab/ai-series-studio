@@ -267,3 +267,40 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 5 · voice 1
   - All zeros (already gone) → `Project already removed or not found.`
 - "Saved credits" intentionally **not surfaced** — the backend does not yet compute that and we did not invent the number.
 - Frontend-only; no backend / API key / Stripe changes. Lint clean and prod build OK (179 kB gzip).
+
+
+## Iteration 16 (2026-02) — Phase 2A: provider service-layer foundation
+**Goal**: prepare the architecture for real providers — without enabling, calling, or storing any real credentials.
+
+### New backend package — `/app/backend/providers/`
+- `base.py` — `ProviderResult` dataclass (`modality`, `provider_name`, `model_name`, `mode` (mock|real), `status` (success|blocked|failed|skipped), `estimated_credits`, `provider_job_id`, `output`, `error`, `message`, `meta`), `BaseProvider`, `MockProviderMixin`, `MODALITIES`.
+- `mocks.py` — `MockLLM/Image/Video/Voice/Music/Export` plus `MOCK_PROVIDER_BY_MODALITY` dispatch.
+- `resolver.py` — pure-logic resolver. Priority: **character → project (when override on) → global → hard-fallback mock**. `resolve_voice_for_character()` adds the character layer on top.
+- `keys.py` — `key_present(provider)` always returns `False`; `key_status() = "not_configured"`. This is the deliberate Phase 2A seam — no key storage, no env reads.
+- `executor.py` — `execute_provider(...)` resolves → checks flag → checks key → dispatches. **Real path is unreachable today**: if a flag is mistakenly flipped on, the executor still runs the mock and tags `status="blocked"`. `provider_status(...)` returns a diagnostic snapshot. `run_modality_test(...)` powers the unified dry-run endpoint.
+
+### New backend endpoints (additive, no behavior change to existing routes)
+- `POST /api/providers/test` — body `{modality, project_id?}` → `{ok: true, mode: "mock", status: "skipped", provider, model, source, feature_flag_enabled, key_status, key_present, message}`.
+- `GET /api/providers/{modality}/status` — diagnostic snapshot for a modality (optional `?project_id=`).
+
+### Executor guard wired into existing generators (non-behavior-changing)
+- `POST /projects/{id}/rewrite`, `POST /scenes/{id}/generate-image`, `_create_scene_segment` (used by `POST /scenes/{id}/segments` and `POST /scenes/{id}/expand`) now call `execute_provider(...)` before the existing mock work. The guard always resolves to the mock today, logs `mode/status/provider/model`, and the response shape stays byte-for-byte identical.
+
+### Frontend
+- `ProvidersTab.jsx` effective-global view gains two informational rows per modality card: **Mode → "Mock"** (data-testid `eff-mode-<modality>`) and **Key status → "not configured"** (data-testid `eff-key-status-<modality>`). No input fields added.
+
+### Tests — **83/83 passing** (was 62, +21)
+- `/app/backend/tests/test_provider_layer.py` (15 unit tests): global fallback, project override beats global, override-on-empty falls back to global, hard-fallback when no config, unknown modality rejected, character voice override beats project/global, project voice override beats global, global voice fallback, executor runs mock when flag off, executor blocks (mock + `status=blocked`) when flag on but no key, estimated_credits respected, voice modality routes through character resolver, dry-run returns mock response, status snapshot, status rejects unknown modality.
+- 6 e2e cases appended to `backend_test.py`: unified `/providers/test` mock response, with project override, 404 for missing project, `/providers/{modality}/status` global, 400 for unknown modality, existing image generation still works through the guard.
+
+### Hard guarantees (verified)
+- `grep -rn "requests.|httpx.|aiohttp|openai.|anthropic.|fal_client|elevenlabs." /app/backend/providers/` → empty. **No real network code exists in the provider layer.**
+- All `USE_REAL_*_PROVIDER` flags remain `false`. Even if one is flipped on, `key_present()` returns `False` and the executor refuses the real path.
+- No API key inputs added on the UI. No Stripe. No auth.
+
+### Files added (8)
+- `backend/providers/__init__.py`, `base.py`, `mocks.py`, `resolver.py`, `keys.py`, `executor.py`
+- `backend/tests/test_provider_layer.py`
+- (1 modified) `backend/server.py` — imports + 2 new endpoints + 3 guard insertions
+- (1 modified) `frontend/src/pages/tabs/ProvidersTab.jsx` — 2 new info rows per modality card
+- (1 modified) `backend/tests/backend_test.py` — 6 e2e cases appended
