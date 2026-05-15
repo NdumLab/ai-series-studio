@@ -243,3 +243,64 @@ def test_admin_endpoints(s):
     stats = s.get(f"{API}/admin/stats").json()
     for k in ["users", "projects", "generations", "failed_jobs", "credits_used", "internal_cost_usd"]:
         assert k in stats
+
+
+# ---------- Provider settings ----------
+def test_provider_options(s):
+    r = s.get(f"{API}/settings/providers/options")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["mock_mode"] is True
+    for m in ("llm", "image", "video", "voice", "music", "export"):
+        assert m in d["catalog"]
+        assert any(p["id"] == "custom" for p in d["catalog"][m])
+
+
+def test_provider_settings_get_and_update(s):
+    r = s.get(f"{API}/settings/providers")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["mock_mode"] is True
+    for m in ("llm", "image", "video", "voice", "music", "export"):
+        assert m in d
+        assert "provider" in d[m]
+        assert "model" in d[m]
+
+    # Update a couple of modalities
+    r2 = s.put(
+        f"{API}/settings/providers",
+        json={
+            "image": {"provider": "openai-image", "model": "gpt-image-1"},
+            "video": {"provider": "luma", "model": "ray-2"},
+            "music": {"provider": "custom", "custom_provider": "internal-music", "custom_model": "v1"},
+        },
+    )
+    assert r2.status_code == 200, r2.text
+    out = r2.json()
+    assert out["image"]["provider"] == "openai-image"
+    assert out["video"]["provider"] == "luma"
+    assert out["music"]["provider"] == "custom"
+    assert out["music"]["custom_provider"] == "internal-music"
+    assert out["mock_mode"] is True
+
+    # No API key field is ever returned or accepted
+    for m in ("llm", "image", "video", "voice", "music", "export"):
+        assert "api_key" not in out[m]
+
+
+def test_provider_settings_rejects_unknown_provider(s):
+    r = s.put(
+        f"{API}/settings/providers",
+        json={"image": {"provider": "totally-not-real", "model": "x"}},
+    )
+    assert r.status_code == 400
+
+
+def test_provider_test_connection_is_mocked(s):
+    r = s.post(f"{API}/settings/providers/test", json={"modality": "voice"})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["mock_mode"] is True
+    assert d["ok"] is True
+    assert "Mock mode" in d["message"]
+    assert d["modality"] == "voice"

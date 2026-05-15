@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
-import { Film, LayoutDashboard, ShieldCheck } from "lucide-react";
+import { Film, LayoutDashboard, ShieldCheck, Settings as SettingsIcon } from "lucide-react";
 
 const navItem =
   "px-3 py-1.5 rounded-md text-sm font-medium tracking-tight transition-colors";
@@ -42,6 +42,17 @@ export default function Layout() {
               >
                 <span className="inline-flex items-center gap-1.5">
                   <LayoutDashboard className="w-3.5 h-3.5" /> Studio
+                </span>
+              </NavLink>
+              <NavLink
+                to="/settings"
+                data-testid="nav-settings"
+                className={({ isActive }) =>
+                  `${navItem} ${isActive ? activeNav : inactiveNav}`
+                }
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <SettingsIcon className="w-3.5 h-3.5" /> Settings
                 </span>
               </NavLink>
               <NavLink

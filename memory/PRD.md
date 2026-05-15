@@ -55,3 +55,16 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 5 · voice 1
 - POST /api/scenes/{id}/segments and /expand now accept optional { continuity_prompt }
 - Cascade-delete segments when project is deleted.
 - Backend tests extended to 18 cases — added test_expand_chain_links_parents covering full expansion chain.
+
+## Iteration 3 (2026-02) — Provider Settings page
+- New `/settings` route + nav link "Settings" (gear icon).
+- 6 modality cards: LLM (story rewrite) · Image · Video · Voice · Music · Export (FFmpeg). Each card has provider Select + model Select + Test connection button. Picking "Custom …" reveals custom provider ID and custom model ID inputs.
+- API keys are intentionally NOT exposed yet — only provider/model selection is persisted.
+- Two informational banners on the page: "Mock mode active — no real provider calls are made" and "API keys are intentionally disabled".
+- Backend: new `provider_settings` MongoDB collection (single doc id="global"), endpoints:
+  - GET /api/settings/providers/options — provider catalog (modalities + provider+model lists).
+  - GET /api/settings/providers — current selections (forces mock_mode=true).
+  - PUT /api/settings/providers — validates provider id against catalog; rejects unknown.
+  - POST /api/settings/providers/test — always returns "Mock mode active — real provider call skipped."
+- Tests: 22/22 passing (added 4 cases: options shape, get/update round-trip + custom provider, unknown-provider 400, mocked test endpoint).
+- No keys stored, no real APIs touched.

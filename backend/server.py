@@ -65,6 +65,150 @@ MUSIC_MOODS = ["Cinematic", "Tense", "Uplifting", "Mysterious", "Romantic", "Act
 COSTS = {"rewrite": 3, "split_scenes": 4, "image": 2, "video_segment": 5, "voice": 1}
 
 # ---------------------------------------------------------------------------
+# Provider catalog (display only — no real calls)
+# ---------------------------------------------------------------------------
+PROVIDER_CATALOG = {
+    "llm": [
+        {"id": "openai", "label": "OpenAI", "models": ["gpt-5.2", "gpt-4o", "gpt-4o-mini"]},
+        {"id": "anthropic", "label": "Claude", "models": ["claude-sonnet-4.5", "claude-opus-4.5", "claude-haiku-4.5"]},
+        {"id": "gemini", "label": "Gemini", "models": ["gemini-3-pro", "gemini-3-flash"]},
+        {"id": "custom", "label": "Custom provider/model ID", "models": []},
+    ],
+    "image": [
+        {"id": "fal", "label": "fal.ai", "models": ["flux-pro", "flux-dev", "ideogram-v2"]},
+        {"id": "gemini-nano-banana", "label": "Gemini Nano Banana", "models": ["nano-banana"]},
+        {"id": "openai-image", "label": "OpenAI gpt-image-1", "models": ["gpt-image-1"]},
+        {"id": "custom", "label": "Custom image provider", "models": []},
+    ],
+    "video": [
+        {"id": "sora-2", "label": "Sora 2", "models": ["sora-2"]},
+        {"id": "runway", "label": "Runway Gen-4.5", "models": ["gen-4.5", "gen-4.5-turbo"]},
+        {"id": "luma", "label": "Luma Ray / Dream Machine", "models": ["ray-2", "dream-machine-1.6"]},
+        {"id": "custom", "label": "Custom video provider", "models": []},
+    ],
+    "voice": [
+        {"id": "elevenlabs", "label": "ElevenLabs", "models": ["eleven-v3", "eleven-turbo"]},
+        {"id": "openai-tts", "label": "OpenAI TTS", "models": ["tts-1-hd", "tts-1"]},
+        {"id": "google-tts", "label": "Google Cloud TTS", "models": ["studio", "neural2"]},
+        {"id": "custom", "label": "Custom voice provider", "models": []},
+    ],
+    "music": [
+        {"id": "suno", "label": "Suno", "models": ["v4", "v3.5"]},
+        {"id": "udio", "label": "Udio", "models": ["udio-130", "udio-32"]},
+        {"id": "elevenlabs-music", "label": "ElevenLabs Music", "models": ["music-v1"]},
+        {"id": "mubert", "label": "Mubert", "models": ["pro", "standard"]},
+        {"id": "custom", "label": "Custom music provider", "models": []},
+    ],
+    "export": [
+        {"id": "ffmpeg-local", "label": "FFmpeg local worker", "models": ["ffmpeg-6"]},
+        {"id": "aws-mediaconvert", "label": "AWS MediaConvert", "models": ["default"]},
+        {"id": "custom", "label": "Custom export worker", "models": []},
+    ],
+}
+
+PROVIDER_MODALITIES = list(PROVIDER_CATALOG.keys())
+
+DEFAULT_PROVIDER_SETTINGS = {
+    "llm": {"provider": "openai", "model": "gpt-5.2", "custom_provider": "", "custom_model": ""},
+    "image": {"provider": "fal", "model": "flux-pro", "custom_provider": "", "custom_model": ""},
+    "video": {"provider": "sora-2", "model": "sora-2", "custom_provider": "", "custom_model": ""},
+    "voice": {"provider": "elevenlabs", "model": "eleven-v3", "custom_provider": "", "custom_model": ""},
+    "music": {"provider": "suno", "model": "v4", "custom_provider": "", "custom_model": ""},
+    "export": {"provider": "ffmpeg-local", "model": "ffmpeg-6", "custom_provider": "", "custom_model": ""},
+}
+SETTINGS_DOC_ID = "global"
+
+# ---------------------------------------------------------------------------
+# Provider settings (selection only — no real calls, no API keys stored)
+# ---------------------------------------------------------------------------
+class ProviderModalitySetting(BaseModel):
+    provider: str
+    model: str = ""
+    custom_provider: str = ""
+    custom_model: str = ""
+
+
+class ProviderSettingsUpdate(BaseModel):
+    llm: Optional[ProviderModalitySetting] = None
+    image: Optional[ProviderModalitySetting] = None
+    video: Optional[ProviderModalitySetting] = None
+    voice: Optional[ProviderModalitySetting] = None
+    music: Optional[ProviderModalitySetting] = None
+    export: Optional[ProviderModalitySetting] = None
+
+
+class ProviderTestRequest(BaseModel):
+    modality: Literal["llm", "image", "video", "voice", "music", "export"]
+
+
+async def _load_provider_settings() -> dict:
+    doc = await db.provider_settings.find_one({"id": SETTINGS_DOC_ID}, {"_id": 0})
+    if not doc:
+        doc = {
+            "id": SETTINGS_DOC_ID,
+            "mock_mode": True,
+            "updated_at": now_iso(),
+            **DEFAULT_PROVIDER_SETTINGS,
+        }
+        await db.provider_settings.insert_one(doc.copy())
+    # Always force mock_mode True until real APIs are wired
+    doc["mock_mode"] = True
+    return doc
+
+
+@api.get("/settings/providers/options")
+async def provider_options():
+    return {
+        "modalities": PROVIDER_MODALITIES,
+        "catalog": PROVIDER_CATALOG,
+        "mock_mode": True,
+    }
+
+
+@api.get("/settings/providers")
+async def get_provider_settings():
+    return await _load_provider_settings()
+
+
+@api.put("/settings/providers")
+async def update_provider_settings(body: ProviderSettingsUpdate):
+    update: dict = {"updated_at": now_iso()}
+    body_dict = body.model_dump(exclude_none=True)
+    for modality, val in body_dict.items():
+        if modality not in PROVIDER_MODALITIES:
+            continue
+        valid_ids = {p["id"] for p in PROVIDER_CATALOG[modality]}
+        if val.get("provider") not in valid_ids:
+            raise HTTPException(400, f"Unknown {modality} provider: {val.get('provider')}")
+        update[modality] = {
+            "provider": val.get("provider"),
+            "model": (val.get("model") or "").strip(),
+            "custom_provider": (val.get("custom_provider") or "").strip(),
+            "custom_model": (val.get("custom_model") or "").strip(),
+        }
+    await db.provider_settings.update_one(
+        {"id": SETTINGS_DOC_ID},
+        {"$set": update},
+        upsert=True,
+    )
+    return await _load_provider_settings()
+
+
+@api.post("/settings/providers/test")
+async def test_provider_connection(body: ProviderTestRequest):
+    settings = await _load_provider_settings()
+    cfg = settings.get(body.modality, {})
+    return {
+        "modality": body.modality,
+        "provider": cfg.get("provider"),
+        "model": cfg.get("model"),
+        "ok": True,
+        "mock_mode": True,
+        "message": "Mock mode active — real provider call skipped.",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 def now_iso() -> str:

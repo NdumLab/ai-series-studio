@@ -5,6 +5,7 @@ import Layout from "@/components/Layout";
 import Dashboard from "@/pages/Dashboard";
 import ProjectStudio from "@/pages/ProjectStudio";
 import Admin from "@/pages/Admin";
+import Settings from "@/pages/Settings";
 
 function App() {
   return (
@@ -14,6 +15,7 @@ function App() {
           <Route element={<Layout />}>
             <Route path="/" element={<Dashboard />} />
             <Route path="/projects/:id" element={<ProjectStudio />} />
+            <Route path="/settings" element={<Settings />} />
             <Route path="/admin" element={<Admin />} />
           </Route>
         </Routes>

@@ -46,6 +46,14 @@ export const Meta = {
   me: () => api.get("/me").then((r) => r.data),
 };
 
+export const ProviderSettings = {
+  options: () => api.get("/settings/providers/options").then((r) => r.data),
+  get: () => api.get("/settings/providers").then((r) => r.data),
+  update: (payload) => api.put("/settings/providers", payload).then((r) => r.data),
+  test: (modality) =>
+    api.post("/settings/providers/test", { modality }).then((r) => r.data),
+};
+
 export const Admin = {
   stats: () => api.get("/admin/stats").then((r) => r.data),
   users: () => api.get("/admin/users").then((r) => r.data),
