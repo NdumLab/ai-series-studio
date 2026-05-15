@@ -6,7 +6,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "../components/ui/tabs";
-import { Users, FolderKanban, Sparkles, AlertTriangle, DollarSign } from "lucide-react";
+import { Users, FolderKanban, Sparkles, AlertTriangle, DollarSign, Activity } from "lucide-react";
 
 export default function Admin() {
   const [stats, setStats] = useState(null);
@@ -14,6 +14,12 @@ export default function Admin() {
   const [projects, setProjects] = useState([]);
   const [gens, setGens] = useState([]);
   const [failed, setFailed] = useState([]);
+  const [activity, setActivity] = useState({ items: [], count: 0 });
+
+  const loadActivity = () =>
+    AdminApi.providerActivity(50).then((d) =>
+      setActivity({ items: d.items || [], count: d.count || 0 })
+    );
 
   useEffect(() => {
     AdminApi.stats().then(setStats);
@@ -21,6 +27,7 @@ export default function Admin() {
     AdminApi.projects().then(setProjects);
     AdminApi.generations().then(setGens);
     AdminApi.failedJobs().then(setFailed);
+    loadActivity();
   }, []);
 
   return (
@@ -53,6 +60,11 @@ export default function Admin() {
           <TabsTrigger value="projects" data-testid="admin-tab-projects">Projects</TabsTrigger>
           <TabsTrigger value="generations" data-testid="admin-tab-generations">Generations</TabsTrigger>
           <TabsTrigger value="failed" data-testid="admin-tab-failed">Failed jobs</TabsTrigger>
+          <TabsTrigger value="provider-activity" data-testid="admin-tab-provider-activity">
+            <span className="inline-flex items-center gap-1.5">
+              <Activity className="w-3.5 h-3.5" /> Provider activity
+            </span>
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="users" className="mt-4">
@@ -105,6 +117,38 @@ export default function Admin() {
               new Date(g.created_at).toLocaleString(),
             ])}
             testId="admin-failed-table"
+          />
+        </TabsContent>
+
+        <TabsContent value="provider-activity" className="mt-4">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs text-[#A1A1AA]">
+              Last 50 provider executions · safe metadata only · no prompts, outputs or API keys are stored.
+            </p>
+            <button
+              type="button"
+              onClick={loadActivity}
+              data-testid="admin-provider-activity-refresh"
+              className="text-xs px-3 py-1.5 rounded-md border border-white/15 text-white hover:bg-white/5"
+            >
+              Refresh
+            </button>
+          </div>
+          <Table
+            head={["When", "Modality", "Provider/Model", "Source", "Mode", "Status", "Credits", "Job id", "Duration", "Message"]}
+            rows={activity.items.map((r) => [
+              new Date(r.created_at).toLocaleTimeString(),
+              r.modality,
+              `${r.provider_name || "—"}/${r.model_name || "—"}`,
+              r.source || "—",
+              r.mode,
+              r.status,
+              r.estimated_credits ?? 0,
+              r.provider_job_id || "—",
+              r.duration_ms != null ? `${r.duration_ms}ms` : "—",
+              r.error || r.message || "—",
+            ])}
+            testId="admin-provider-activity-table"
           />
         </TabsContent>
       </Tabs>

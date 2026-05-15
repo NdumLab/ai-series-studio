@@ -23,7 +23,12 @@ from .base import (
     MODALITIES,
 )
 from .resolver import resolve_provider, resolve_voice_for_character
-from .executor import execute_provider, run_modality_test, provider_status
+from .executor import (
+    execute_provider,
+    run_modality_test,
+    provider_status,
+    set_activity_recorder,
+)
 
 __all__ = [
     "ProviderResult",
@@ -35,4 +40,5 @@ __all__ = [
     "execute_provider",
     "run_modality_test",
     "provider_status",
+    "set_activity_recorder",
 ]

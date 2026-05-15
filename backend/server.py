@@ -34,7 +34,28 @@ from providers import (  # noqa: E402  (kept after logger init)
     resolve_provider,
     resolve_voice_for_character,
     run_modality_test,
+    set_activity_recorder,
 )
+
+
+# Activity recorder — writes safe metadata to the `provider_activity` collection.
+# Never includes prompts, raw outputs, or API keys.
+_PROVIDER_ACTIVITY_SAFE_FIELDS = {
+    "modality", "provider_name", "model_name", "source", "mode", "status",
+    "estimated_credits", "provider_job_id", "message", "error", "duration_ms",
+    "project_id", "scene_id", "segment_id", "feature_flag_enabled", "key_present",
+}
+
+
+async def _record_provider_activity(record: dict) -> None:
+    # Strict allowlist — anything outside this set is dropped.
+    safe = {k: v for k, v in record.items() if k in _PROVIDER_ACTIVITY_SAFE_FIELDS}
+    safe["id"] = str(uuid.uuid4())
+    safe["created_at"] = datetime.now(timezone.utc).isoformat()
+    await db.provider_activity.insert_one(safe)
+
+
+set_activity_recorder(_record_provider_activity)
 
 # ---------------------------------------------------------------------------
 # Constants & mock asset pools
@@ -899,6 +920,7 @@ async def rewrite_story(project_id: str):
         project=proj,
         global_settings=global_settings,
         estimated_credits=COSTS["rewrite"],
+        project_id=project_id,
     )
     log.info("provider.rewrite mode=%s status=%s provider=%s/%s", guard.mode, guard.status, guard.provider_name, guard.model_name)
     rewritten = mock_rewrite_story(proj.get("idea", ""))
@@ -1034,6 +1056,8 @@ async def generate_image(scene_id: str):
         project=proj,
         global_settings=global_settings,
         estimated_credits=COSTS["image"],
+        project_id=scene["project_id"],
+        scene_id=scene_id,
     )
     log.info("provider.image mode=%s status=%s provider=%s/%s", guard.mode, guard.status, guard.provider_name, guard.model_name)
     # 5% mock failure to power admin failed jobs widget
@@ -1068,6 +1092,8 @@ async def _create_scene_segment(
         project=proj,
         global_settings=global_settings,
         estimated_credits=COSTS["video_segment"],
+        project_id=scene["project_id"],
+        scene_id=scene_id,
     )
     log.info("provider.video mode=%s status=%s provider=%s/%s", guard.mode, guard.status, guard.provider_name, guard.model_name)
     if random.random() < 0.05:
@@ -1366,6 +1392,14 @@ async def admin_generations():
 @api.get("/admin/failed-jobs")
 async def admin_failed_jobs():
     return await db.generations.find({"status": "failed"}, {"_id": 0}).sort("created_at", -1).to_list(200)
+
+
+@api.get("/admin/provider-activity")
+async def admin_provider_activity(limit: int = 50):
+    """Latest provider execution records (safe metadata only, no secrets)."""
+    capped = max(1, min(int(limit or 50), 200))
+    rows = await db.provider_activity.find({}, {"_id": 0}).sort("created_at", -1).to_list(capped)
+    return {"limit": capped, "count": len(rows), "items": rows}
 
 
 # ---------------------------------------------------------------------------

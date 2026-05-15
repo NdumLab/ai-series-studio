@@ -1361,3 +1361,91 @@ def test_existing_image_generation_still_works_with_guard(s, project_id):
     assert "image_url" in body
     assert body["cost"] == 2
 
+
+
+# ---------- Phase 2A.5 provider activity log ----------
+_SECRET_FIELDS = {
+    "api_key", "secret", "secret_key", "authorization", "bearer", "token",
+    "password", "client_secret",
+}
+# Substrings we never want to see leak into the activity log
+_SECRET_FORBIDDEN_SUBSTRINGS = ("sk-", "Bearer ", "api_key=", "api-key=")
+_SAFE_FIELDS = {
+    "id", "created_at", "modality", "provider_name", "model_name", "source",
+    "mode", "status", "estimated_credits", "provider_job_id", "message",
+    "error", "duration_ms", "project_id", "scene_id", "segment_id",
+    "feature_flag_enabled", "key_present",
+}
+
+
+def _assert_record_is_safe(rec):
+    # 1. Only safe metadata fields exist.
+    extra = set(rec.keys()) - _SAFE_FIELDS
+    assert not extra, f"Activity record leaked unexpected fields: {extra}"
+    # 2. No common secret keys present.
+    for k in rec.keys():
+        assert k.lower() not in _SECRET_FIELDS
+    # 3. No common secret substrings in any string value.
+    for k, v in rec.items():
+        if isinstance(v, str):
+            for needle in _SECRET_FORBIDDEN_SUBSTRINGS:
+                assert needle not in v, f"Secret-like substring '{needle}' found in {k}"
+    # 4. Mock-mode invariants — every record this iteration is mock.
+    assert rec["mode"] == "mock"
+    assert rec["key_present"] is False
+
+
+def test_provider_activity_endpoint_shape(s):
+    r = s.get(f"{API}/admin/provider-activity?limit=5")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "items" in body and "count" in body and body["limit"] == 5
+
+
+def test_provider_activity_records_created_for_rewrite_image_video(s):
+    pid = s.post(f"{API}/projects", json={"title": "ActivityTest", "idea": "x"}).json()["id"]
+    try:
+        # rewrite → LLM activity
+        s.post(f"{API}/projects/{pid}/rewrite")
+        s.post(f"{API}/projects/{pid}/split-scenes")
+        scene_id = s.get(f"{API}/projects/{pid}").json()["scenes"][0]["id"]
+        # image → image activity
+        _retry(lambda: s.post(f"{API}/scenes/{scene_id}/generate-image"))
+        # video segment → video activity
+        _retry(lambda: s.post(f"{API}/scenes/{scene_id}/segments"))
+
+        items = s.get(f"{API}/admin/provider-activity?limit=50").json()["items"]
+        # The latest items should include records for this project.
+        ours = [i for i in items if i.get("project_id") == pid]
+        modalities = {i["modality"] for i in ours}
+        assert {"llm", "image", "video"}.issubset(modalities), (
+            f"Expected llm/image/video activity for {pid}, got {modalities}"
+        )
+
+        # Each record looks safe + carries duration + correct scope ids.
+        for rec in ours:
+            _assert_record_is_safe(rec)
+            assert rec["status"] in ("success", "blocked", "skipped", "failed")
+            assert isinstance(rec.get("duration_ms"), int)
+            assert rec["estimated_credits"] >= 0
+        # The image + video records should reference scene_id.
+        for rec in ours:
+            if rec["modality"] in ("image", "video"):
+                assert rec.get("scene_id") == scene_id
+    finally:
+        s.delete(f"{API}/projects/{pid}")
+
+
+def test_provider_activity_no_api_keys_anywhere(s):
+    rows = s.get(f"{API}/admin/provider-activity?limit=200").json()["items"]
+    for rec in rows:
+        _assert_record_is_safe(rec)
+
+
+def test_provider_activity_limit_capping(s):
+    # Limit of 5000 must clamp to <= 200.
+    r = s.get(f"{API}/admin/provider-activity?limit=5000")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["limit"] <= 200
+

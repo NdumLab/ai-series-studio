@@ -12,7 +12,8 @@ clean `ProviderResult` with `mode="mock"` and a transparent `message`.
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, Optional
+import time
+from typing import Any, Awaitable, Callable, Dict, Optional
 
 from .base import (
     ProviderResult,
@@ -25,6 +26,25 @@ from .base import (
 from .keys import key_present, key_status
 from .mocks import MOCK_PROVIDER_BY_MODALITY
 from .resolver import resolve_provider, resolve_voice_for_character
+
+# ---------------------------------------------------------------------------
+# Activity recorder seam
+# ---------------------------------------------------------------------------
+# The provider package stays storage-agnostic. The host app registers a
+# coroutine that persists safe metadata for each execute_provider() call.
+# The recorder is *only* given the `ProviderResult` + safe scope ids — never
+# raw prompts, outputs or API keys.
+
+ActivityRecorder = Callable[[Dict[str, Any]], Awaitable[None]]
+_recorder: Optional[ActivityRecorder] = None
+
+
+def set_activity_recorder(fn: Optional[ActivityRecorder]) -> None:
+    """Register a coroutine that persists provider activity metadata.
+
+    Pass `None` to disable recording (used by unit tests)."""
+    global _recorder
+    _recorder = fn
 
 _FLAG_ENV_KEYS = {
     "llm":    "USE_REAL_LLM_PROVIDER",
@@ -96,6 +116,10 @@ async def execute_provider(
     global_settings: Dict[str, Any],
     character: Optional[Dict[str, Any]] = None,
     estimated_credits: int = 0,
+    # Scope ids — recorded as safe metadata, never combined with prompts.
+    project_id: Optional[str] = None,
+    scene_id: Optional[str] = None,
+    segment_id: Optional[str] = None,
     **call_kwargs: Any,
 ) -> ProviderResult:
     """Resolve + run a provider call.
@@ -124,33 +148,50 @@ async def execute_provider(
 
     # Real path is blocked in Phase 2A regardless of flag, because no key store
     # exists yet. We still run the mock so callers get a usable response.
-    if flag_on and not has_key:
-        mock_cls = MOCK_PROVIDER_BY_MODALITY[modality]
-        mock = mock_cls(
-            provider_name=resolved["provider"], model_name=resolved["model"]
-        )
-        res = await mock.run(**call_kwargs)
-        res.estimated_credits = estimated_credits or res.estimated_credits
-        res.status = STATUS_BLOCKED
-        res.mode = "mock"
-        res.message = (
-            "Real provider blocked — feature flag is on but no API key is "
-            "configured server-side. Mock provider ran instead."
-        )
-        res.meta = meta
-        return res
-
-    # Standard mock path (flag off OR no real provider implemented yet).
     mock_cls = MOCK_PROVIDER_BY_MODALITY[modality]
     mock = mock_cls(
         provider_name=resolved["provider"], model_name=resolved["model"]
     )
+    started = time.perf_counter()
     res = await mock.run(**call_kwargs)
+    duration_ms = int((time.perf_counter() - started) * 1000)
     res.estimated_credits = estimated_credits or res.estimated_credits
-    res.status = STATUS_SUCCESS
     res.mode = "mock"
-    res.message = "Mock mode active — real provider call skipped."
+    if flag_on and not has_key:
+        res.status = STATUS_BLOCKED
+        res.message = (
+            "Real provider blocked — feature flag is on but no API key is "
+            "configured server-side. Mock provider ran instead."
+        )
+    else:
+        res.status = STATUS_SUCCESS
+        res.message = "Mock mode active — real provider call skipped."
     res.meta = meta
+
+    if _recorder is not None:
+        record = {
+            "modality": res.modality,
+            "provider_name": res.provider_name,
+            "model_name": res.model_name,
+            "source": resolved["source"],
+            "mode": res.mode,
+            "status": res.status,
+            "estimated_credits": res.estimated_credits,
+            "provider_job_id": res.provider_job_id,
+            "message": res.message,
+            "error": res.error,
+            "duration_ms": duration_ms,
+            "project_id": project_id,
+            "scene_id": scene_id,
+            "segment_id": segment_id,
+            "feature_flag_enabled": flag_on,
+            "key_present": has_key,
+        }
+        try:
+            await _recorder(record)
+        except Exception:  # pragma: no cover — never let recording break a call
+            pass
+
     return res
 
 

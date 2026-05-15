@@ -89,4 +89,6 @@ export const Admin = {
   projects: () => api.get("/admin/projects").then((r) => r.data),
   generations: () => api.get("/admin/generations").then((r) => r.data),
   failedJobs: () => api.get("/admin/failed-jobs").then((r) => r.data),
+  providerActivity: (limit = 50) =>
+    api.get(`/admin/provider-activity?limit=${limit}`).then((r) => r.data),
 };

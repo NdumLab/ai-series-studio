@@ -304,3 +304,41 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 5 · voice 1
 - (1 modified) `backend/server.py` — imports + 2 new endpoints + 3 guard insertions
 - (1 modified) `frontend/src/pages/tabs/ProvidersTab.jsx` — 2 new info rows per modality card
 - (1 modified) `backend/tests/backend_test.py` — 6 e2e cases appended
+
+
+## Iteration 17 (2026-02) — Phase 2A.5: guard state on project view + Admin Provider Activity
+**Goal**: make every provider call observable (Admin view) and surface the guard state on the per-project Providers tab — still no real APIs, no key inputs, no Stripe, no auth.
+
+### Backend
+- New `_record_provider_activity(record)` coroutine in `server.py` is registered via `providers.set_activity_recorder(...)`. Each `execute_provider()` call now:
+  1. Times the mock with `time.perf_counter()` → `duration_ms`.
+  2. Pushes a **strictly allowlisted** metadata dict into the new `provider_activity` Mongo collection.
+- Allowlist (no prompts, no outputs, no keys, no secrets): `modality, provider_name, model_name, source, mode, status, estimated_credits, provider_job_id, message, error, duration_ms, project_id, scene_id, segment_id, feature_flag_enabled, key_present` + auto-added `id` + `created_at`.
+- New endpoint: `GET /api/admin/provider-activity?limit=50` → `{limit, count, items[]}` (clamped to ≤ 200).
+- `execute_provider(...)` now accepts `project_id`, `scene_id`, `segment_id` scope kwargs. The three existing wired call sites (rewrite, generate-image, segment create) pass them through.
+
+### Frontend
+- `Admin.jsx` gains a new tab **Provider activity** showing: When · Modality · Provider/Model · Source · Mode · Status · Credits · Job id · Duration · Message. Includes a manual **Refresh** button. Banner reminds: "safe metadata only · no prompts, outputs or API keys are stored."
+- `ProvidersTab.jsx`: new shared `GuardStateRows` component used both on the global view AND on each per-project override card. Rows show: Source · Mode (Mock) · Feature flag (disabled) · Key status (not configured) · Real call (blocked · mock-only).
+
+### Tests — **87/87 passing** (was 83, +4)
+- `test_provider_activity_endpoint_shape` — endpoint returns `{limit, count, items}`.
+- `test_provider_activity_records_created_for_rewrite_image_video` — runs the three generators on a fresh project, asserts an `llm`, `image`, and `video` record exist, all `mode=mock`, all carry sane `duration_ms`, `estimated_credits`, and correct `scene_id` scope where applicable.
+- `test_provider_activity_no_api_keys_anywhere` — scans the latest 200 rows. Asserts allowlist-only fields, no `api_key|secret|token|password` field names, no `sk-`/`Bearer `/`api_key=`/`api-key=` substrings in any string value, every row has `mode=mock` and `key_present=false`.
+- `test_provider_activity_limit_capping` — `?limit=5000` is clamped to ≤ 200.
+
+### Hard guarantees (re-verified this iteration)
+- `grep -rn "requests.|httpx.|aiohttp|openai.|anthropic.|fal_client|elevenlabs." /app/backend/providers/` → empty.
+- Every record in `provider_activity` today has `mode="mock"` and `key_present=false`.
+- All `USE_REAL_*_PROVIDER` flags remain `false`. `key_present()` always `False`.
+- No API key input fields anywhere on the UI.
+
+### Files changed/added
+**Modified** (6):
+- `backend/server.py` — recorder registration + admin endpoint + 3 guard call sites pass scope ids.
+- `backend/providers/__init__.py` — export `set_activity_recorder`.
+- `backend/providers/executor.py` — `set_activity_recorder()` setter + `duration_ms` timing + scoped kwargs + safe-metadata write.
+- `frontend/src/pages/tabs/ProvidersTab.jsx` — new `GuardStateRows` used on both global + project views.
+- `frontend/src/pages/Admin.jsx` — new "Provider activity" tab + table.
+- `frontend/src/lib/api.js` — `Admin.providerActivity(limit)` helper.
+- `backend/tests/backend_test.py` — 4 new e2e cases appended.

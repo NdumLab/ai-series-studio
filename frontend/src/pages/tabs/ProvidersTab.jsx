@@ -306,23 +306,8 @@ function EffectiveGlobalView({ effective, onTest }) {
               <dd className="text-white text-right truncate">{eff.provider || "—"}</dd>
               <dt className="text-[#A1A1AA]">Model</dt>
               <dd className="text-white text-right truncate">{eff.model || "—"}</dd>
-              <dt className="text-[#A1A1AA]">Source</dt>
-              <dd className="text-[#A1A1AA] text-right">{eff.source}</dd>
-              <dt className="text-[#A1A1AA]">Mode</dt>
-              <dd
-                className="text-right text-[#FFCC00]"
-                data-testid={`eff-mode-${sec.key}`}
-              >
-                Mock
-              </dd>
-              <dt className="text-[#A1A1AA]">Key status</dt>
-              <dd
-                className="text-right text-[#A1A1AA]"
-                data-testid={`eff-key-status-${sec.key}`}
-              >
-                not configured
-              </dd>
             </dl>
+            <GuardStateRows modality={sec.key} effective={eff} variant="eff" />
           </div>
         );
       })}
@@ -432,7 +417,51 @@ function ProjectProviderCard({
             </Select>
           </div>
         ) : null}
+
+        <GuardStateRows modality={sec.key} effective={effective} variant="project" />
       </div>
     </div>
+  );
+}
+
+function GuardStateRows({ modality, effective, variant = "global" }) {
+  const sourceLabel =
+    effective?.source === "project"
+      ? "Project override"
+      : effective?.source === "global-fallback"
+        ? "Fallback to global"
+        : effective?.source === "hard-fallback"
+          ? "Fallback mock"
+          : "Global default";
+  const tid = (suffix) => `${variant}-${suffix}-${modality}`;
+  return (
+    <dl
+      data-testid={tid("guard-state")}
+      className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] font-mono border-t border-white/5 pt-3"
+    >
+      <dt className="text-[#A1A1AA]">Source</dt>
+      <dd className="text-right text-[#A1A1AA]" data-testid={tid("source")}>
+        {sourceLabel}
+      </dd>
+      <dt className="text-[#A1A1AA]">Mode</dt>
+      <dd className="text-right text-[#FFCC00]" data-testid={tid("mode")}>
+        Mock
+      </dd>
+      <dt className="text-[#A1A1AA]">Feature flag</dt>
+      <dd className="text-right text-[#A1A1AA]" data-testid={tid("flag")}>
+        disabled
+      </dd>
+      <dt className="text-[#A1A1AA]">Key status</dt>
+      <dd className="text-right text-[#A1A1AA]" data-testid={tid("key")}>
+        not configured
+      </dd>
+      <dt className="text-[#A1A1AA]">Real call</dt>
+      <dd
+        className="text-right text-[#34C759]"
+        data-testid={tid("real-call")}
+      >
+        blocked · mock-only
+      </dd>
+    </dl>
   );
 }
