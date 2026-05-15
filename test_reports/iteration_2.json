@@ -1,0 +1,37 @@
+{
+  "summary": "Post-refactor regression + optimistic drag-and-drop verification for AI Episode Studio. Backend: 59/59 pytest cases pass against public REACT_APP_BACKEND_URL (covers projects CRUD, rewrite, split, scenes/segments, scene/segment reorder with start_second recomputation, foreign-id rejection, cost/wallet/high-cost thresholds, reduce-to-draft, providers override, voice resolution, admin, feature flags). Frontend: opened seeded project '49560a92', cycled through all 8 tabs (story/scenes/characters/images/segments/voice-music/export/providers) with zero crashes and zero console errors/warnings. Scene drag reorder: DOM updated optimistically (no snap-back) and order persisted across page reload. Segment drag reorder: same — DOM optimistic update + persistence after reload, plus start_second recomputed (backend test asserts [0,5,10] after reverse). CostBadge + WalletRing rendered in header (~114 credits, 46% of wallet, ring filled to 46%). ProviderHintChip in Segments tab rendered correctly ('sora-2/sora-2 · ~12 credits per 5-second segment · USING GLOBAL DEFAULT'). Mock-mode banner visible. SceneSegmentBlock setData prop fix confirmed working — segment optimistic update now functions.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "DELETE /api/projects/{id}", "issue": "Segments belonging to scenes of deleted project still not cascade-deleted (carry-over from iteration 1)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/iteration_2.xml"
+  ],
+  "action_items": [
+    "(Optional, carry-over) Cascade-delete segments when their parent project is deleted in server.py delete_project.",
+    "(Backlogged per user) Add character drag handles in Characters tab — not in scope for this iteration."
+  ],
+  "critical_code_review_comments": [
+    "ProjectStudio.jsx successfully slimmed from ~2285 lines to ~225 lines — clean orchestrator pattern with per-tab files; good separation.",
+    "Optimistic reorder pattern is correct: parent-owned setData() updates state immediately, await API, then reload({skipProject:true}) refreshes derived data (scene-costs) without snapping the list. On failure, prev snapshot is restored and a toast is shown.",
+    "SortableList correctly restricts drag activation to the grip-icon button via {...attributes}{...listeners} on the handle only — form fields and buttons inside cards remain interactive.",
+    "PointerSensor activationConstraint distance=6 prevents accidental drags; works smoothly in headless Playwright with 3-step pre-move + 15-step move.",
+    "Segment reorder optimistic recomputation of start_second matches the backend formula (cumulative duration), so UI stays consistent during the brief async window."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (59/59)", "frontend": "100% of critical flows (8 tabs + scene & segment drag + persistence)"},
+  "test_credentials": "None required (single-user demo, user-demo seeded).",
+  "seed_data_creation": "Used existing seeded project 49560a92 (TEST UI Project). Drag test reordered scenes & segments on that project — order persisted to DB; harmless for subsequent runs.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend regression baseline lives at /app/backend/tests/backend_test.py (59 tests, ~16s). Frontend optimistic drag works via setData prop passed from ProjectStudio → ScenesTab + VideoSegmentsTab. To re-test drag with Playwright, use a 3-step initial mouse.move after mouse.down (to satisfy dnd-kit's distance=6 activation constraint) then a 15-step move to the target. Cost badge uses [data-testid=cost-badge] would be a nice-to-have addition but is not required for current verification — it is visible and functional. No real provider wiring; mock mode strict.",
+  "rca of the issue": "No bugs found in this iteration. The previously-suspected silent bug (SceneSegmentBlock not destructuring setData) was fixed in the refactor and is verified working — segment drag optimistic update visibly shifts DOM order before reload."
+}
