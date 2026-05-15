@@ -1,13 +1,16 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { Video, Plus } from "lucide-react";
+import { Video, Plus, Wand2 } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { SortableList } from "../../components/SortableList";
 import { ProviderHintChip } from "../../components/studio/ProviderHintChip";
 import { InfoCallout } from "../../components/studio/InfoCallout";
 import { EmptyState } from "../../components/studio/EmptyState";
 import { SegmentCard } from "../../components/studio/SegmentCard";
-import { Scenes } from "../../lib/api";
+import { Creative, Scenes } from "../../lib/api";
+
+const VIDEO_HINT =
+  "This video prompt is enhanced for: motion, continuity, emotion, camera movement.";
 
 export function VideoSegmentsTab({ scenes, providers, options, setData, reload }) {
   if (!scenes.length) {
@@ -22,7 +25,7 @@ export function VideoSegmentsTab({ scenes, providers, options, setData, reload }
         action="video generation"
         credits={c ? `~${c} credits per 5-second segment` : null}
       />
-      <InfoCallout text="Each scene contains 5-second video segments. Use 'Expand next 5s' to chain a continuation that references the previous segment. Drag a segment's grip handle to reorder." />
+      <InfoCallout text={VIDEO_HINT} />
       {scenes.map((s, i) => (
         <SceneSegmentBlock
           key={s.id}
@@ -66,16 +69,50 @@ function SceneSegmentBlock({ scene, index, setData, reload }) {
     }
   };
 
+  const enhance = async () => {
+    setBusy(true);
+    try {
+      await Creative.enhanceScene(scene.id, "video-prompt");
+      toast.success("Video prompt enhanced");
+      reload();
+    } catch {
+      toast.error("Enhance failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const enhanced = !!scene.enhanced_video_prompt;
+
   return (
     <div className="es-card p-5" data-testid={`scene-segments-${scene.id}`}>
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <div>
           <p className="font-mono text-[10px] uppercase tracking-widest text-[#A1A1AA]">
             Scene {String(index + 1).padStart(2, "0")}
+            {enhanced && (
+              <span
+                className="ml-2 inline-flex items-center gap-1 px-1.5 py-0 rounded border border-[#34C759]/30 bg-[#34C759]/5 text-[#34C759]"
+                data-testid={`video-enhanced-chip-${scene.id}`}
+              >
+                <Wand2 className="w-2.5 h-2.5" /> enhanced
+              </span>
+            )}
           </p>
           <h4 className="font-display text-lg font-bold">{scene.title}</h4>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={enhance}
+            disabled={busy}
+            data-testid={`enhance-video-prompt-${scene.id}`}
+            className="border-white/15 bg-transparent text-white hover:bg-white/10 hover:text-white"
+          >
+            <Wand2 className="w-3.5 h-3.5 mr-1.5" />
+            {enhanced ? "Re-enhance" : "Enhance prompt"}
+          </Button>
           {segments.length === 0 && (
             <Button
               size="sm"

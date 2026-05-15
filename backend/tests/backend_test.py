@@ -1577,3 +1577,182 @@ def test_provider_health_no_secrets_in_response(s, clean_seed):
     for m in body["modalities"]:
         assert set(m.keys()) == allowed
 
+
+
+# ---------- Creative Quality Engine ----------
+_QUALITY_KEYS = (
+    "hook_strength", "conflict_strength", "emotional_tension",
+    "visual_potential", "cliffhanger_strength", "dialogue_strength",
+    "overall_story_score",
+)
+
+
+def _fresh_quality_project(s, title="QualityTest"):
+    pid = s.post(f"{API}/projects", json={"title": title, "idea": "Two thieves break into a vault with a secret older than them."}).json()["id"]
+    s.post(f"{API}/projects/{pid}/rewrite")
+    s.post(f"{API}/projects/{pid}/split-scenes")
+    return pid
+
+
+def test_story_quality_scores_populated_after_rewrite(s):
+    pid = s.post(f"{API}/projects", json={"title": "ScoreCheck", "idea": "A reporter risks everything to expose a city-wide secret."}).json()["id"]
+    try:
+        r = s.post(f"{API}/projects/{pid}/rewrite")
+        assert r.status_code == 200
+        body = r.json()
+        assert "quality_scores" in body
+        for k in _QUALITY_KEYS:
+            assert k in body["quality_scores"]
+            assert 1 <= int(body["quality_scores"][k]) <= 100
+
+        # Score also persisted on the project document
+        proj = s.get(f"{API}/projects/{pid}").json()["project"]
+        for k in _QUALITY_KEYS:
+            assert proj["quality_scores"][k] == body["quality_scores"][k]
+    finally:
+        s.delete(f"{API}/projects/{pid}")
+
+
+def test_improve_story_endpoint_updates_story_and_scores(s):
+    pid = _fresh_quality_project(s, "ImproveCheck")
+    try:
+        before = s.get(f"{API}/projects/{pid}").json()["project"]
+        story_before = before["rewritten_story"]
+        scores_before = before["quality_scores"]
+
+        r = s.post(f"{API}/projects/{pid}/improve-story", json={"kind": "cliffhanger"})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert "rewritten_story" in body
+        assert body["rewritten_story"] != story_before
+        assert "quality_scores" in body
+        # cliffhanger boost — cliffhanger_strength should rise (deterministic mock)
+        assert body["quality_scores"]["cliffhanger_strength"] >= scores_before["cliffhanger_strength"]
+        assert body["improvement"]["kind"] == "cliffhanger"
+
+        # History is persisted
+        after = s.get(f"{API}/projects/{pid}").json()["project"]
+        hist = after.get("improvement_history", [])
+        assert len(hist) >= 1
+        assert hist[-1]["kind"] == "cliffhanger"
+    finally:
+        s.delete(f"{API}/projects/{pid}")
+
+
+def test_improve_story_unknown_kind_rejected(s):
+    pid = _fresh_quality_project(s, "ImproveBadKind")
+    try:
+        r = s.post(f"{API}/projects/{pid}/improve-story", json={"kind": "not-a-real-kind"})
+        assert r.status_code == 422  # pydantic Literal rejection
+    finally:
+        s.delete(f"{API}/projects/{pid}")
+
+
+def test_scenes_have_tension_fields_after_split(s):
+    pid = _fresh_quality_project(s, "TensionFields")
+    try:
+        scenes = s.get(f"{API}/projects/{pid}").json()["scenes"]
+        assert scenes, "expected scenes after split"
+        for sc in scenes:
+            assert 15 <= int(sc["tension_level"]) <= 99
+            assert sc["emotional_goal"]
+            assert sc["conflict_point"]
+            assert sc["reveal_or_turning_point"]
+            assert 1 <= int(sc["cliffhanger_value"]) <= 100
+            # Prompt enhancer fields exist (may be empty strings prior to enhance)
+            assert "raw_visual_prompt" in sc
+            assert "enhanced_image_prompt" in sc
+            assert "enhanced_video_prompt" in sc
+    finally:
+        s.delete(f"{API}/projects/{pid}")
+
+
+def test_enhance_image_and_video_prompt(s):
+    pid = _fresh_quality_project(s, "PromptEnhance")
+    try:
+        scene = s.get(f"{API}/projects/{pid}").json()["scenes"][0]
+        r1 = s.post(f"{API}/scenes/{scene['id']}/enhance-prompt", json={"kind": "image-prompt"})
+        assert r1.status_code == 200
+        sc1 = r1.json()["scene"]
+        assert sc1["enhanced_image_prompt"]
+        assert "lighting" in sc1["enhanced_image_prompt"].lower() or "cinematic" in sc1["enhanced_image_prompt"].lower()
+        assert sc1["enhanced_video_prompt"] == ""  # not enhanced yet
+
+        r2 = s.post(f"{API}/scenes/{scene['id']}/enhance-prompt", json={"kind": "video-prompt"})
+        assert r2.status_code == 200
+        sc2 = r2.json()["scene"]
+        assert sc2["enhanced_video_prompt"]
+        assert "camera" in sc2["enhanced_video_prompt"].lower() or "motion" in sc2["enhanced_video_prompt"].lower()
+        # The image enhancement is still there
+        assert sc2["enhanced_image_prompt"]
+    finally:
+        s.delete(f"{API}/projects/{pid}")
+
+
+def test_improve_scene_drama_and_dialogue(s):
+    pid = _fresh_quality_project(s, "SceneDrama")
+    try:
+        scene = s.get(f"{API}/projects/{pid}").json()["scenes"][0]
+        tension0 = scene["tension_level"]
+
+        r = s.post(f"{API}/scenes/{scene['id']}/enhance-prompt", json={"kind": "scene-drama"})
+        assert r.status_code == 200
+        sc = r.json()["scene"]
+        assert sc["tension_level"] > tension0
+        # Dialogue gets prefixed with a heightened line
+        assert '"' in sc["dialogue"]
+
+        r2 = s.post(f"{API}/scenes/{scene['id']}/enhance-prompt", json={"kind": "dialogue"})
+        assert r2.status_code == 200
+        sc2 = r2.json()["scene"]
+        assert sc2["dialogue"]
+    finally:
+        s.delete(f"{API}/projects/{pid}")
+
+
+def test_creative_hints_endpoint(s):
+    r = s.get(f"{API}/creative/enhancement-hints")
+    assert r.status_code == 200
+    body = r.json()
+    assert "lighting" in body["image_traits"]
+    assert "motion" in body["video_traits"]
+    assert "realism" in body["image_hint"]
+    assert "motion" in body["video_hint"]
+    assert "suspenseful" in body["improve_kinds"]
+    assert "image-prompt" in body["enhance_kinds"]
+    for k in _QUALITY_KEYS:
+        assert k in body["quality_keys"]
+
+
+def test_existing_rewrite_split_generate_expand_export_still_work(s):
+    """Regression — Creative Quality endpoints did not break the core pipeline."""
+    pid = s.post(f"{API}/projects", json={"title": "Regression", "idea": "x"}).json()["id"]
+    try:
+        assert s.post(f"{API}/projects/{pid}/rewrite").status_code == 200
+        assert s.post(f"{API}/projects/{pid}/split-scenes").status_code == 200
+        scene_id = s.get(f"{API}/projects/{pid}").json()["scenes"][0]["id"]
+        assert _retry(lambda: s.post(f"{API}/scenes/{scene_id}/generate-image")).status_code == 200
+        assert _retry(lambda: s.post(f"{API}/scenes/{scene_id}/segments")).status_code == 200
+        assert _retry(lambda: s.post(f"{API}/scenes/{scene_id}/expand")).status_code == 200
+        assert s.get(f"{API}/projects/{pid}/export").status_code == 200
+    finally:
+        s.delete(f"{API}/projects/{pid}")
+
+
+def test_provider_activity_remains_mock_after_quality_work(s):
+    """After running a quality improvement + prompt enhancement, every recent provider
+    activity row is still mock-mode."""
+    pid = _fresh_quality_project(s, "MockGuard")
+    try:
+        s.post(f"{API}/projects/{pid}/improve-story", json={"kind": "emotional"})
+        scene = s.get(f"{API}/projects/{pid}").json()["scenes"][0]
+        s.post(f"{API}/scenes/{scene['id']}/enhance-prompt", json={"kind": "image-prompt"})
+
+        rows = s.get(f"{API}/admin/provider-activity?limit=200").json()["items"]
+        assert rows, "expected provider activity records"
+        for r in rows:
+            assert r["mode"] == "mock"
+            assert r["key_present"] is False
+    finally:
+        s.delete(f"{API}/projects/{pid}")
+

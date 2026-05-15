@@ -70,6 +70,16 @@ export const FeatureFlags = {
   get: () => api.get("/feature-flags").then((r) => r.data),
 };
 
+export const Creative = {
+  hints: () => api.get("/creative/enhancement-hints").then((r) => r.data),
+  recomputeScore: (projectId) =>
+    api.post(`/projects/${projectId}/quality-score`).then((r) => r.data),
+  improveStory: (projectId, kind) =>
+    api.post(`/projects/${projectId}/improve-story`, { kind }).then((r) => r.data),
+  enhanceScene: (sceneId, kind) =>
+    api.post(`/scenes/${sceneId}/enhance-prompt`, { kind }).then((r) => r.data),
+};
+
 export const ProjectProviders = {
   get: (projectId) =>
     api.get(`/projects/${projectId}/providers`).then((r) => r.data),

@@ -4,6 +4,8 @@ import { Wand2, Save, Split } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Textarea } from "../../components/ui/textarea";
 import { ProviderHintChip } from "../../components/studio/ProviderHintChip";
+import { QualityScorePanel } from "../../components/studio/QualityScorePanel";
+import { ImproveStoryMenu } from "../../components/studio/ImproveStoryMenu";
 import { Projects } from "../../lib/api";
 
 export function StoryTab({ project, providers, options, reload, onContinue }) {
@@ -100,15 +102,25 @@ export function StoryTab({ project, providers, options, reload, onContinue }) {
                 Edit freely before splitting into scenes.
               </p>
             </div>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={saveStory}
-              data-testid="save-story-btn"
-              className="border-white/15 bg-transparent text-white hover:bg-white/10 hover:text-white"
-            >
-              <Save className="w-3.5 h-3.5 mr-1.5" /> Save
-            </Button>
+            <div className="flex items-center gap-2">
+              <ImproveStoryMenu
+                projectId={project.id}
+                disabled={!story.trim()}
+                onImproved={(res) => {
+                  setStory(res.rewritten_story);
+                  reload();
+                }}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={saveStory}
+                data-testid="save-story-btn"
+                className="border-white/15 bg-transparent text-white hover:bg-white/10 hover:text-white"
+              >
+                <Save className="w-3.5 h-3.5 mr-1.5" /> Save
+              </Button>
+            </div>
           </div>
           <Textarea
             data-testid="story-textarea"
@@ -128,6 +140,8 @@ export function StoryTab({ project, providers, options, reload, onContinue }) {
           </Button>
         </div>
       </div>
+
+      <QualityScorePanel scores={project.quality_scores} />
     </div>
   );
 }

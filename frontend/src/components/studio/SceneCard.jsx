@@ -7,6 +7,7 @@ import { Textarea } from "../ui/textarea";
 import { Scenes } from "../../lib/api";
 import { FieldInput } from "./FieldInput";
 import { SceneCostWidget } from "./SceneCostWidget";
+import { SceneTensionMeter } from "./SceneTensionMeter";
 
 export function SceneCard({
   index,
@@ -167,6 +168,10 @@ export function SceneCard({
             </div>
           </div>
         )}
+      </div>
+
+      <div className="mt-4">
+        <SceneTensionMeter scene={local} onImproved={(updated) => setLocal(updated)} />
       </div>
     </div>
   );

@@ -1,0 +1,61 @@
+{
+  "summary": "Creative Quality Engine (Phase 2B mock-only) verified end-to-end. Backend: 102/102 pytest pass (~22s). Curl smoke against public REACT_APP_BACKEND_URL confirms exact response shapes for /api/creative/enhancement-hints, POST /projects/{id}/rewrite (now returns quality_scores), POST /projects/{id}/improve-story (returns updated rewritten_story + refreshed quality_scores; pushes improvement_history; 422 on unknown kind), POST /scenes/{id}/enhance-prompt for all 4 kinds (image-prompt, video-prompt, scene-drama, dialogue). Scene tension fields (tension_level, emotional_goal, conflict_point, reveal_or_turning_point, cliffhanger_value, raw_visual_prompt) populated on split. Provider invariant holds: 200/200 rows in /api/admin/provider-activity have mode='mock' and key_present=false. Frontend: All required data-testids render on Story/Scenes/Images/Video Segments tabs; both enhancement banners visible; zero console errors.",
+  "endpoint_verification": {
+    "GET /api/creative/enhancement-hints": "200 -> image_traits, video_traits, image_hint, video_hint, improve_kinds (7), enhance_kinds (4), quality_keys (all 7). PASS",
+    "POST /api/projects/{id}/rewrite": "200 -> {rewritten_story, cost, quality_scores}. All 7 keys present, each 35-65 in sample. PASS",
+    "GET /api/projects/{id}": "200 -> response wrapper is {project, scenes, characters}; project.quality_scores populated after rewrite. PASS",
+    "POST /api/projects/{id}/improve-story {kind:'suspenseful'}": "200 -> {rewritten_story, quality_scores, improvement}. improvement_history persisted on project doc (verified via re-GET, len=1, kind+note+at). PASS",
+    "POST /api/projects/{id}/improve-story {kind:'nonsense'}": "HTTP 422. PASS",
+    "POST /api/scenes/{id}/enhance-prompt image-prompt": "200 -> scene.enhanced_image_prompt populated with realism/lighting/anamorphic tail. PASS",
+    "POST /api/scenes/{id}/enhance-prompt video-prompt": "200 -> scene.enhanced_video_prompt populated. PASS",
+    "POST /api/scenes/{id}/enhance-prompt scene-drama": "200 -> tension_level bumped to 88 (from 76, +12), dialogue heightened with drama prefix. PASS",
+    "POST /api/scenes/{id}/enhance-prompt dialogue": "200 -> dialogue prefixed with realistic confession line. PASS",
+    "GET /api/admin/provider-activity?limit=200": "rows=200 across modalities {llm,image,video}. bad=0 (every row mode='mock' && key_present=false). PASS"
+  },
+  "frontend_verification": {
+    "StoryTab": "improve-story-trigger present; opening dropdown shows all 7 kinds (suspenseful, emotional, romantic, darker, cliffhanger, realistic-dialogue, cinematic) with correct testids. quality-score-panel renders 6 bar rows (Hook/Conflict/Emotional tension/Visual potential/Cliffhanger/Dialogue) and quality-overall=58 in big number.",
+    "ScenesTab": "tension-meter-<sceneId> renders TENSION bar (88/100 on Cold Open), Emotional goal / Conflict / Turning point / Cliffhanger rows, plus improve-drama-<sceneId> and improve-dialogue-<sceneId> buttons. Color shifts from yellow (mid) to red (high) based on tension.",
+    "ImagesTab": "enhance-image-prompt-<sceneId> button present; image-enhanced-chip-<sceneId> visible after enhancement; banner 'This image prompt is enhanced for: realism, lighting, character consistency, camera framing.' visible at top of tab.",
+    "VideoSegmentsTab": "enhance-video-prompt-<sceneId> button present; video-enhanced-chip-<sceneId> visible after enhancement; banner 'This video prompt is enhanced for: motion, continuity, emotion, camera movement.' visible.",
+    "Console errors/warnings": "None across Story->Scenes->Images->Video Segments navigation.",
+    "Mock-mode banner": "'MOCK MODE - NO REAL AI APIS CONNECTED YET' visible in header on every tab."
+  },
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/test_provider_layer.py",
+    "/app/test_reports/pytest/iteration_4.xml"
+  ],
+  "action_items": [
+    "(Non-blocking) Seeded projects 49560a92 and ca07057e initially had quality_scores=None and rewritten_story empty on this preview env — main agent's note said they had been re-rewritten but they were not. Testing agent triggered POST /rewrite + /improve-story on 49560a92 to populate. Re-seed script (or migration on startup) recommended so the seeded projects always demo the new fields.",
+    "(Polish, not required by spec) QualityScorePanel uses a single wrapper testid; per-bar testids like data-testid='quality-bar-hook_strength' would make future automation cheaper. Bars render correctly today.",
+    "(Polish) SceneTensionMeter rows don't have per-field testids (emotional_goal/conflict_point/etc). Spec asked them to be visible — they are — but per-field testids would help future regression tests."
+  ],
+  "critical_code_review_comments": [
+    "creative_quality.py is genuinely deterministic (hashlib + seeded random). Same inputs always produce same outputs — re-runs of the e2e tests are stable.",
+    "compute_quality_scores uses _clip(lo=20, hi=98) but spec calls for 1-100. In practice outputs land 35-98 because of the base+keyword math, so the 1-100 contract is satisfied. Worth a comment in the module for clarity.",
+    "improve-story endpoint correctly $push'es to improvement_history and $set's the new rewritten_story+quality_scores atomically in one update_one call. Good.",
+    "GET /projects/{id} response shape is {project, scenes, characters} — not flat. Frontend already handles this; document it for future API consumers.",
+    "Provider activity invariant verified across 200 rows: no row leaked mode!='mock' or key_present=true even after improve-story + enhance-prompt traffic. The Creative Quality Engine is fully pure-logic — confirmed by absence of network imports in /app/backend/creative_quality.py.",
+    "Carry-over (non-blocking from iter 2/3): DELETE /api/projects/{id} still does not cascade-delete segments whose scenes belong to the project."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (102/102 pytest + 10/10 curl smoke + provider invariant 200/200)",
+    "frontend": "100% (all required data-testids present on Story/Scenes/Images/Segments; 0 console errors)"
+  },
+  "test_credentials": "Not required (single-user demo).",
+  "seed_data_creation": "Triggered POST /api/projects/49560a92.../rewrite and POST /api/projects/49560a92.../improve-story {kind:'suspenseful'} to populate quality_scores + improvement_history on the seeded project (they were empty at start). Triggered enhance-prompt image-prompt/video-prompt/scene-drama/dialogue on scene ac7d38b1 to populate enhanced_image_prompt, enhanced_video_prompt, bumped tension_level, and dialogue. All scenes/projects remain in the same DB.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend pytest baseline is now 102 tests (cd /app/backend && python -m pytest tests/ -q ~22s). Creative Quality Engine lives at /app/backend/creative_quality.py — pure-logic, deterministic, no network. New endpoints: GET /api/creative/enhancement-hints, POST /api/projects/{id}/quality-score, POST /api/projects/{id}/improve-story, POST /api/scenes/{id}/enhance-prompt. Frontend additions: ImproveStoryMenu (testid improve-story-trigger + improve-story-<kind>), QualityScorePanel (testid quality-score-panel + quality-overall), SceneTensionMeter (tension-meter-<sceneId> + improve-drama-<sceneId> + improve-dialogue-<sceneId>), Enhance buttons + chips on Images/Segments tabs. Video Segments tab testid is 'tab-segments' (NOT 'tab-video-segments'). The wrapper GET /projects/{id} returns {project, scenes, characters} — quality_scores lives on project, not on the top-level dict. Seeded projects need a manual /rewrite call to populate quality_scores in this preview env.",
+  "rca of the issue": "No bugs found in this iteration. Feature set behaves exactly as specified; the only friction was the seed-state drift on the preview env (quality_scores=None on a seeded project at start) which is a data-seeding gap, not a code bug."
+}

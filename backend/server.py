@@ -36,6 +36,23 @@ from providers import (  # noqa: E402  (kept after logger init)
     run_modality_test,
     set_activity_recorder,
 )
+# Phase 2C creative quality engine (mock-only).
+from creative_quality import (  # noqa: E402
+    QUALITY_KEYS,
+    IMPROVE_KINDS,
+    ENHANCE_KINDS,
+    compute_quality_scores,
+    apply_improvement,
+    compute_scene_tension,
+    enhance_image_prompt,
+    enhance_video_prompt,
+    improve_scene_drama,
+    improve_scene_dialogue,
+    IMAGE_PROMPT_TRAITS,
+    VIDEO_PROMPT_TRAITS,
+    IMAGE_ENHANCEMENT_HINT,
+    VIDEO_ENHANCEMENT_HINT,
+)
 
 
 # Activity recorder — writes safe metadata to the `provider_activity` collection.
@@ -924,12 +941,18 @@ async def rewrite_story(project_id: str):
     )
     log.info("provider.rewrite mode=%s status=%s provider=%s/%s", guard.mode, guard.status, guard.provider_name, guard.model_name)
     rewritten = mock_rewrite_story(proj.get("idea", ""))
+    scores = compute_quality_scores(proj.get("idea", ""), rewritten)
     await db.projects.update_one(
         {"id": project_id},
-        {"$set": {"rewritten_story": rewritten, "status": "story_ready", "updated_at": now_iso()}},
+        {"$set": {
+            "rewritten_story": rewritten,
+            "status": "story_ready",
+            "quality_scores": scores,
+            "updated_at": now_iso(),
+        }},
     )
     await log_generation("rewrite", project_id, COSTS["rewrite"])
-    return {"rewritten_story": rewritten, "cost": COSTS["rewrite"]}
+    return {"rewritten_story": rewritten, "cost": COSTS["rewrite"], "quality_scores": scores}
 
 
 @api.post("/projects/{project_id}/split-scenes")
@@ -944,16 +967,119 @@ async def split_scenes(project_id: str):
     await db.scenes.delete_many({"project_id": project_id})
 
     new_scenes = []
-    for scene in mock_split_scenes(proj.get("rewritten_story", "")):
+    for idx, scene in enumerate(mock_split_scenes(proj.get("rewritten_story", ""))):
         scene["id"] = new_id()
         scene["project_id"] = project_id
         scene["created_at"] = now_iso()
+        # Creative quality fields — deterministic mocks.
+        scene["raw_visual_prompt"] = scene.get("visual_prompt", "")
+        scene["enhanced_image_prompt"] = ""
+        scene["enhanced_video_prompt"] = ""
+        scene.update(compute_scene_tension(scene, idx))
         new_scenes.append(scene)
     if new_scenes:
         await db.scenes.insert_many([s.copy() for s in new_scenes])
     await db.projects.update_one({"id": project_id}, {"$set": {"status": "scenes_ready", "updated_at": now_iso()}})
     await log_generation("split_scenes", project_id, COSTS["split_scenes"])
     return {"scenes": new_scenes}
+
+
+# ---------------------------------------------------------------------------
+# Creative Quality Engine (mock-only)
+# ---------------------------------------------------------------------------
+class ImproveStoryRequest(BaseModel):
+    kind: Literal["suspenseful", "emotional", "romantic", "darker", "cliffhanger", "realistic-dialogue", "cinematic"]
+
+
+class EnhanceSceneRequest(BaseModel):
+    kind: Literal["image-prompt", "video-prompt", "scene-drama", "dialogue"]
+
+
+@api.post("/projects/{project_id}/quality-score")
+async def recompute_quality_score(project_id: str):
+    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    scores = compute_quality_scores(proj.get("idea", ""), proj.get("rewritten_story", ""))
+    await db.projects.update_one(
+        {"id": project_id},
+        {"$set": {"quality_scores": scores, "updated_at": now_iso()}},
+    )
+    return {"quality_scores": scores}
+
+
+@api.post("/projects/{project_id}/improve-story")
+async def improve_story(project_id: str, body: ImproveStoryRequest):
+    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    if not (proj.get("rewritten_story") or "").strip():
+        raise HTTPException(400, "Story is empty — rewrite it first.")
+    new_story, note = apply_improvement(proj["rewritten_story"], body.kind)
+    scores = compute_quality_scores(proj.get("idea", ""), new_story)
+    history_entry = {
+        "id": new_id(),
+        "kind": body.kind,
+        "note": note,
+        "at": now_iso(),
+    }
+    await db.projects.update_one(
+        {"id": project_id},
+        {
+            "$set": {
+                "rewritten_story": new_story,
+                "quality_scores": scores,
+                "updated_at": now_iso(),
+            },
+            "$push": {"improvement_history": history_entry},
+        },
+    )
+    return {
+        "rewritten_story": new_story,
+        "quality_scores": scores,
+        "improvement": history_entry,
+    }
+
+
+@api.post("/scenes/{scene_id}/enhance-prompt")
+async def enhance_scene_prompt(scene_id: str, body: EnhanceSceneRequest):
+    scene = await db.scenes.find_one({"id": scene_id}, {"_id": 0})
+    if not scene:
+        raise HTTPException(404, "Scene not found")
+    update: dict = {}
+    if body.kind == "image-prompt":
+        update["raw_visual_prompt"] = scene.get("visual_prompt") or scene.get("raw_visual_prompt") or ""
+        update["enhanced_image_prompt"] = enhance_image_prompt(update["raw_visual_prompt"], scene)
+    elif body.kind == "video-prompt":
+        update["raw_visual_prompt"] = scene.get("visual_prompt") or scene.get("raw_visual_prompt") or ""
+        update["enhanced_video_prompt"] = enhance_video_prompt(update["raw_visual_prompt"], scene)
+    elif body.kind == "scene-drama":
+        update.update(improve_scene_drama(scene))
+    elif body.kind == "dialogue":
+        update.update(improve_scene_dialogue(scene))
+    update["updated_at"] = now_iso()
+    await db.scenes.update_one({"id": scene_id}, {"$set": update})
+    out = await db.scenes.find_one({"id": scene_id}, {"_id": 0})
+    return {
+        "kind": body.kind,
+        "scene": out,
+        "image_enhancement_hint": IMAGE_ENHANCEMENT_HINT,
+        "video_enhancement_hint": VIDEO_ENHANCEMENT_HINT,
+    }
+
+
+@api.get("/creative/enhancement-hints")
+async def creative_enhancement_hints():
+    """Static hints shown on the Images / Video Segments tabs."""
+    return {
+        "image_traits": list(IMAGE_PROMPT_TRAITS),
+        "video_traits": list(VIDEO_PROMPT_TRAITS),
+        "image_hint": IMAGE_ENHANCEMENT_HINT,
+        "video_hint": VIDEO_ENHANCEMENT_HINT,
+        "improve_kinds": list(IMPROVE_KINDS),
+        "enhance_kinds": list(ENHANCE_KINDS),
+        "quality_keys": list(QUALITY_KEYS),
+    }
 
 
 # ---------------------------------------------------------------------------

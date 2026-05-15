@@ -1,11 +1,14 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { Image as ImageIcon } from "lucide-react";
+import { Image as ImageIcon, Wand2 } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { ProviderHintChip } from "../../components/studio/ProviderHintChip";
 import { InfoCallout } from "../../components/studio/InfoCallout";
 import { EmptyState } from "../../components/studio/EmptyState";
-import { Scenes } from "../../lib/api";
+import { Creative, Scenes } from "../../lib/api";
+
+const IMAGE_HINT =
+  "This image prompt is enhanced for: realism, lighting, character consistency, camera framing.";
 
 export function ImagesTab({ scenes, providers, options, reload }) {
   if (!scenes.length) {
@@ -20,7 +23,7 @@ export function ImagesTab({ scenes, providers, options, reload }) {
         action="image generation"
         credits={c ? `~${c} credits per scene image` : null}
       />
-      <InfoCallout text="Generate or regenerate one image per scene. The image becomes the visual anchor for video generation." />
+      <InfoCallout text={IMAGE_HINT} />
       <div
         className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
         data-testid="images-grid"
@@ -35,6 +38,7 @@ export function ImagesTab({ scenes, providers, options, reload }) {
 
 function SceneImageCard({ scene, index, reload }) {
   const [busy, setBusy] = useState(false);
+  const [enhancing, setEnhancing] = useState(false);
   const gen = async () => {
     setBusy(true);
     try {
@@ -47,6 +51,19 @@ function SceneImageCard({ scene, index, reload }) {
       setBusy(false);
     }
   };
+  const enhance = async () => {
+    setEnhancing(true);
+    try {
+      await Creative.enhanceScene(scene.id, "image-prompt");
+      toast.success("Image prompt enhanced");
+      reload();
+    } catch {
+      toast.error("Enhance failed");
+    } finally {
+      setEnhancing(false);
+    }
+  };
+  const enhanced = !!scene.enhanced_image_prompt;
   return (
     <div className="es-card overflow-hidden" data-testid={`image-card-${scene.id}`}>
       <div className="aspect-video bg-black border-b border-white/10 overflow-hidden flex items-center justify-center">
@@ -68,18 +85,41 @@ function SceneImageCard({ scene, index, reload }) {
         </p>
         <h4 className="font-display text-base font-bold mb-1 truncate">{scene.title}</h4>
         <p className="text-xs text-[#A1A1AA] line-clamp-2 min-h-[32px]">
-          {scene.visual_prompt || "No visual prompt yet."}
+          {enhanced
+            ? scene.enhanced_image_prompt
+            : scene.visual_prompt || "No visual prompt yet."}
         </p>
-        <Button
-          onClick={gen}
-          disabled={busy}
-          size="sm"
-          data-testid={`gen-image-${scene.id}`}
-          className="mt-3 w-full bg-[#FF3B30] hover:bg-[#FF453A] text-white"
-        >
-          <ImageIcon className="w-3.5 h-3.5 mr-1.5" />
-          {scene.image_url ? "Regenerate" : "Generate"}
-        </Button>
+        {enhanced && (
+          <span
+            className="inline-flex items-center gap-1 mt-2 px-2 py-0.5 rounded-md border border-[#34C759]/30 bg-[#34C759]/5 text-[#34C759] text-[10px] font-mono uppercase tracking-widest"
+            data-testid={`image-enhanced-chip-${scene.id}`}
+          >
+            <Wand2 className="w-2.5 h-2.5" /> enhanced
+          </span>
+        )}
+        <div className="grid grid-cols-2 gap-2 mt-3">
+          <Button
+            onClick={enhance}
+            disabled={enhancing}
+            size="sm"
+            variant="outline"
+            data-testid={`enhance-image-prompt-${scene.id}`}
+            className="border-white/15 bg-transparent text-white hover:bg-white/10 hover:text-white"
+          >
+            <Wand2 className="w-3.5 h-3.5 mr-1.5" />
+            {enhancing ? "…" : enhanced ? "Re-enhance" : "Enhance"}
+          </Button>
+          <Button
+            onClick={gen}
+            disabled={busy}
+            size="sm"
+            data-testid={`gen-image-${scene.id}`}
+            className="bg-[#FF3B30] hover:bg-[#FF453A] text-white"
+          >
+            <ImageIcon className="w-3.5 h-3.5 mr-1.5" />
+            {scene.image_url ? "Regen" : "Generate"}
+          </Button>
+        </div>
       </div>
     </div>
   );
