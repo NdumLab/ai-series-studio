@@ -1598,7 +1598,52 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     await ensure_default_user()
+    await _backfill_creative_quality()
     log.info("AI Episode Studio backend ready")
+
+
+async def _backfill_creative_quality():
+    """One-shot startup backfill so legacy projects/scenes acquire the
+    Creative Quality fields without requiring users to re-run rewrite + split.
+
+    Safe to run on every startup: skips documents that already have the fields.
+    """
+    # Projects missing quality_scores but with a rewritten_story → compute scores.
+    cursor = db.projects.find(
+        {"$or": [{"quality_scores": {"$exists": False}}, {"quality_scores": None}]},
+        {"_id": 0, "id": 1, "idea": 1, "rewritten_story": 1},
+    )
+    proj_count = 0
+    async for p in cursor:
+        if not (p.get("rewritten_story") or "").strip():
+            continue
+        scores = compute_quality_scores(p.get("idea", ""), p["rewritten_story"])
+        await db.projects.update_one(
+            {"id": p["id"]}, {"$set": {"quality_scores": scores}}
+        )
+        proj_count += 1
+
+    # Scenes missing tension fields → compute.
+    scene_cursor = db.scenes.find(
+        {"$or": [{"tension_level": {"$exists": False}}, {"tension_level": None}]},
+        {"_id": 0},
+    )
+    scene_count = 0
+    async for sc in scene_cursor:
+        update = {
+            "raw_visual_prompt": sc.get("raw_visual_prompt") or sc.get("visual_prompt", ""),
+            "enhanced_image_prompt": sc.get("enhanced_image_prompt", ""),
+            "enhanced_video_prompt": sc.get("enhanced_video_prompt", ""),
+        }
+        update.update(compute_scene_tension(sc))
+        await db.scenes.update_one({"id": sc["id"]}, {"$set": update})
+        scene_count += 1
+
+    if proj_count or scene_count:
+        log.info(
+            "Creative-quality backfill: %d projects scored, %d scenes tensioned",
+            proj_count, scene_count,
+        )
 
 
 @app.on_event("shutdown")

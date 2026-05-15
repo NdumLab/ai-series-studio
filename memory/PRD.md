@@ -390,3 +390,63 @@ Used pymongo directly to seed deterministic `provider_activity` rows tagged with
   1. Server-side encrypted secrets store with per-modality scoping (e.g. age/sops/sealed-box on disk, read-only at runtime).
   2. Emergent-managed universal LLM key for LLM modality only (no additional infra).
   3. Per-tenant KMS once auth/multi-tenant is added (P2 backlog).
+
+
+## Iteration 19 (2026-02) — Creative Quality Engine (mock-only)
+**Goal**: stop optimizing for "calling providers" and start optimizing for "great episodes." All scoring + enhancement is deterministic and rule-based today. Phase 2B will swap the rule-based mocks for real LLM-driven analysis behind feature flags.
+
+### Secrets storage decision
+Per user: **option (b)** for the near term. Use the **Emergent universal LLM key for LLM modality only** when Phase 2B starts. Image / Video / Voice / Music / Export remain blocked until a proper at-rest-encrypted secrets store exists. No generic key storage will be implemented yet. Per-tenant KMS deferred until auth + multi-tenant lands.
+
+### Backend — new module `/app/backend/creative_quality.py`
+Pure-logic, zero-network. Deterministic scoring + enhancement helpers:
+- `QUALITY_KEYS` = `(hook_strength, conflict_strength, emotional_tension, visual_potential, cliffhanger_strength, dialogue_strength, overall_story_score)`.
+- `compute_quality_scores(idea, rewritten)` — base from word count + per-trait keyword scoring + dialogue heuristic, clipped to 20–98, overall = mean of the six dimensions.
+- `apply_improvement(rewritten, kind)` for the 7 mock improvement kinds — each prepends a flavoured snippet to paragraph 1 and returns `(new_story, improvement_note)`.
+- `compute_scene_tension(scene, index)` — seeded by `sha256(id+title+index)` so results are stable; `tension_level`, `cliffhanger_value`, and three narrative dimensions (`emotional_goal`, `conflict_point`, `reveal_or_turning_point`) picked from curated pools.
+- `enhance_image_prompt` / `enhance_video_prompt` / `improve_scene_drama` / `improve_scene_dialogue` — folder of mock transforms.
+
+### Backend — new endpoints
+- `POST /api/projects/{id}/quality-score` — recompute scores on demand.
+- `POST /api/projects/{id}/improve-story` body `{kind}` (7 allowed kinds) — applies a mock improvement, refreshes scores, pushes an entry into `improvement_history`.
+- `POST /api/scenes/{id}/enhance-prompt` body `{kind}` (4 allowed kinds: image-prompt, video-prompt, scene-drama, dialogue).
+- `GET /api/creative/enhancement-hints` — static traits/hints/kinds catalog for the UI.
+
+### Backend — auto-population
+- `rewrite_story` now auto-computes `quality_scores` and returns them inline.
+- `split_scenes` now auto-populates `raw_visual_prompt` + `enhanced_image_prompt/video_prompt` + 5 tension fields on every new scene.
+- **Startup backfill** `_backfill_creative_quality()` runs once on app boot to attach the new fields to any project/scene created before this release. Idempotent.
+
+### Frontend
+- New `Creative` namespace in `lib/api.js` (hints / recomputeScore / improveStory / enhanceScene).
+- New shared components: `QualityScorePanel.jsx` (6 bars + big overall number with color thresholds), `ImproveStoryMenu.jsx` (DropdownMenu with the 7 mock kinds), `SceneTensionMeter.jsx` (tension bar + 4 narrative rows + Improve drama / Improve dialogue actions).
+- `StoryTab.jsx` — Improve story button beside Save in the Episode draft header; QualityScorePanel below the two main cards.
+- `SceneCard.jsx` — `SceneTensionMeter` at the bottom of every scene card; updates instantly when drama/dialogue is improved.
+- `ImagesTab.jsx` — quality hint banner ("This image prompt is enhanced for: realism, lighting, character consistency, camera framing"), per-card **Enhance** button + green "enhanced" chip; image card now shows the enhanced prompt when present.
+- `VideoSegmentsTab.jsx` — quality hint banner ("This video prompt is enhanced for: motion, continuity, emotion, camera movement"), per-scene-block **Enhance prompt** button + "enhanced" chip beside the scene number.
+
+### Tests — **102/102 passing** (was 93, +9)
+- `test_story_quality_scores_populated_after_rewrite` — all 7 keys present, each 1–100, persisted on project document.
+- `test_improve_story_endpoint_updates_story_and_scores` — story changes, cliffhanger_strength rises after a `cliffhanger` improvement (deterministic), `improvement_history` grows by one entry tagged with the kind.
+- `test_improve_story_unknown_kind_rejected` — pydantic Literal rejects unknown kinds (422).
+- `test_scenes_have_tension_fields_after_split` — every scene has tension/goal/conflict/turning/cliffhanger + prompt fields.
+- `test_enhance_image_and_video_prompt` — each kind populates the right field and leaves others alone.
+- `test_improve_scene_drama_and_dialogue` — drama bumps tension_level + heightens dialogue; dialogue-only updates only dialogue.
+- `test_creative_hints_endpoint` — catalog shape.
+- `test_existing_rewrite_split_generate_expand_export_still_work` — full pipeline regression.
+- `test_provider_activity_remains_mock_after_quality_work` — 200/200 activity rows still `mode=mock`, `key_present=false` after running Creative Quality flows.
+
+### Mock-only invariants — re-verified
+- No new real-network code. `providers/` package still empty of http imports. `creative_quality.py` is pure-Python (hashlib, random, re).
+- All `USE_REAL_*_PROVIDER` flags `false`. `key_present()` always `False`.
+- Every existing `provider_activity` row remains `mode=mock`.
+- No API key inputs added. No Stripe. No auth.
+
+### Files changed (10)
+**Added** (4): `backend/creative_quality.py` · `frontend/src/components/studio/QualityScorePanel.jsx` · `frontend/src/components/studio/ImproveStoryMenu.jsx` · `frontend/src/components/studio/SceneTensionMeter.jsx`
+**Modified** (6): `backend/server.py` (imports, auto-score in rewrite, auto-tension in split, 4 new endpoints, startup backfill) · `backend/tests/backend_test.py` (9 new cases) · `frontend/src/lib/api.js` (Creative namespace) · `frontend/src/pages/tabs/StoryTab.jsx` · `frontend/src/pages/tabs/ImagesTab.jsx` · `frontend/src/pages/tabs/VideoSegmentsTab.jsx` · `frontend/src/components/studio/SceneCard.jsx`
+
+### Frontend status
+- ESLint clean across `/pages/` and `/components/`.
+- Production build OK (24.95s).
+- Testing agent iteration_4: 100% backend, 100% frontend, 0 issues, retest_needed=false.
