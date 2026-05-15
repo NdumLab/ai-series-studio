@@ -23,30 +23,40 @@ export default function Layout() {
               AI Episode <span className="text-[#FF3B30]">Studio</span>
             </span>
           </Link>
-          <nav className="flex items-center gap-1">
-            <NavLink
-              to="/"
-              data-testid="nav-dashboard"
-              className={() =>
-                `${navItem} ${pathname === "/" || pathname.startsWith("/projects") ? activeNav : inactiveNav}`
-              }
+          <div className="flex items-center gap-3">
+            <span
+              data-testid="mock-mode-badge"
+              className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-[#FFCC00]/30 bg-[#FFCC00]/10 text-[#FFCC00] text-[10px] font-semibold tracking-widest uppercase font-mono"
+              title="No real AI APIs are connected yet. All generations are mocked."
             >
-              <span className="inline-flex items-center gap-1.5">
-                <LayoutDashboard className="w-3.5 h-3.5" /> Studio
-              </span>
-            </NavLink>
-            <NavLink
-              to="/admin"
-              data-testid="nav-admin"
-              className={({ isActive }) =>
-                `${navItem} ${isActive ? activeNav : inactiveNav}`
-              }
-            >
-              <span className="inline-flex items-center gap-1.5">
-                <ShieldCheck className="w-3.5 h-3.5" /> Admin
-              </span>
-            </NavLink>
-          </nav>
+              <span className="w-1.5 h-1.5 rounded-full bg-[#FFCC00] animate-pulse" />
+              Mock Mode · No real AI APIs connected yet
+            </span>
+            <nav className="flex items-center gap-1">
+              <NavLink
+                to="/"
+                data-testid="nav-dashboard"
+                className={() =>
+                  `${navItem} ${pathname === "/" || pathname.startsWith("/projects") ? activeNav : inactiveNav}`
+                }
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <LayoutDashboard className="w-3.5 h-3.5" /> Studio
+                </span>
+              </NavLink>
+              <NavLink
+                to="/admin"
+                data-testid="nav-admin"
+                className={({ isActive }) =>
+                  `${navItem} ${isActive ? activeNav : inactiveNav}`
+                }
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5" /> Admin
+                </span>
+              </NavLink>
+            </nav>
+          </div>
         </div>
       </header>
       <main className="flex-1 max-w-[1400px] mx-auto w-full px-6 py-8">

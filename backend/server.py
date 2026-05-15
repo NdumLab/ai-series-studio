@@ -158,6 +158,10 @@ class SegmentStatus(BaseModel):
     status: Literal["approved", "rejected", "pending"]
 
 
+class SegmentCreate(BaseModel):
+    continuity_prompt: Optional[str] = None
+
+
 # ---------------------------------------------------------------------------
 # Mock generators
 # ---------------------------------------------------------------------------
@@ -282,8 +286,7 @@ async def delete_project(project_id: str):
     await db.projects.delete_one({"id": project_id})
     await db.scenes.delete_many({"project_id": project_id})
     await db.characters.delete_many({"project_id": project_id})
-    # delete segments belonging to deleted scenes (already deleted scenes; cascade by project tag isn't stored on segments)
-    # we filter via remaining scene ids
+    await db.segments.delete_many({"project_id": project_id})
     return {"ok": True}
 
 
@@ -420,22 +423,46 @@ async def generate_image(scene_id: str):
     return {"image_url": url, "cost": COSTS["image"]}
 
 
-@api.post("/scenes/{scene_id}/segments")
-async def create_segment(scene_id: str):
+async def _create_scene_segment(
+    scene_id: str,
+    *,
+    expand_mode: str,
+    continuity_prompt: Optional[str],
+) -> dict:
+    """Create a new 5s mock video segment for a scene.
+
+    expand_mode = "initial" → first segment (parent_segment_id = None, start_second = 0)
+    expand_mode = "expand"  → continues from latest segment under the same scene.
+    """
     scene = await db.scenes.find_one({"id": scene_id}, {"_id": 0})
     if not scene:
         raise HTTPException(404, "Scene not found")
     if random.random() < 0.05:
         await log_generation("video_segment", scene["project_id"], 0, status="failed", error="mock render failed")
         raise HTTPException(503, "Mock video render failed")
-    count = await db.segments.count_documents({"scene_id": scene_id})
+
+    siblings = await db.segments.find({"scene_id": scene_id}, {"_id": 0}).sort("order", 1).to_list(200)
+    order = len(siblings)
+    parent_segment_id: Optional[str] = None
+    start_second = 0
+    if siblings:
+        last = siblings[-1]
+        start_second = int(last.get("start_second", 0)) + int(last.get("duration", 5))
+        if expand_mode == "expand":
+            parent_segment_id = last["id"]
+
+    duration = 5
     doc = {
         "id": new_id(),
         "scene_id": scene_id,
         "project_id": scene["project_id"],
-        "order": count,
+        "order": order,
+        "parent_segment_id": parent_segment_id,
+        "start_second": start_second,
+        "duration": duration,
+        "expand_mode": expand_mode,
+        "continuity_prompt": (continuity_prompt or scene.get("visual_prompt") or "").strip(),
         "video_url": random.choice(MOCK_VIDEO_URLS),
-        "duration": 5,
         "status": "pending",
         "created_at": now_iso(),
     }
@@ -445,10 +472,25 @@ async def create_segment(scene_id: str):
     return doc
 
 
+@api.post("/scenes/{scene_id}/segments")
+async def create_segment(scene_id: str, body: Optional[SegmentCreate] = None):
+    siblings_count = await db.segments.count_documents({"scene_id": scene_id})
+    mode = "initial" if siblings_count == 0 else "expand"
+    return await _create_scene_segment(
+        scene_id,
+        expand_mode=mode,
+        continuity_prompt=body.continuity_prompt if body else None,
+    )
+
+
 @api.post("/scenes/{scene_id}/expand")
-async def expand_segment(scene_id: str):
-    # Same as creating a new segment – semantically "+5s next"
-    return await create_segment(scene_id)
+async def expand_segment(scene_id: str, body: Optional[SegmentCreate] = None):
+    """Always treated as expansion of the latest segment ("+5s next")."""
+    return await _create_scene_segment(
+        scene_id,
+        expand_mode="expand",
+        continuity_prompt=body.continuity_prompt if body else None,
+    )
 
 
 @api.put("/segments/{segment_id}/status")

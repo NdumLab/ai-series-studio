@@ -43,3 +43,15 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 5 · voice 1
 - Credit purchase + Stripe metering
 - Multi-tenant teams with role-based admin
 - Versioned scene revisions / undo
+
+## Iteration 2 (2026-02) — Workflow & Segment Model
+- Added persistent "Mock Mode: No real AI APIs connected yet" badge in top nav.
+- Project Studio split into 7 explicit stages: Story → Scenes → Characters → Images → Video Segments → Voice/Music → Export, with a clickable workflow progress strip.
+- Story tab makes the rewritten draft editable before splitting (explicit hint).
+- Scenes tab edits text/structure only; media generation moved to Images and Video Segments tabs.
+- Backend segment model extended (additive, backward-compatible):
+  - parent_segment_id, start_second, expand_mode ("initial" | "expand"), continuity_prompt
+  - start_second auto-computed from prior siblings; expand chains link parent → child
+- POST /api/scenes/{id}/segments and /expand now accept optional { continuity_prompt }
+- Cascade-delete segments when project is deleted.
+- Backend tests extended to 18 cases — added test_expand_chain_links_parents covering full expansion chain.

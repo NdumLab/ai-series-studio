@@ -146,19 +146,64 @@ def test_create_segment_and_expand(s, scene_id):
     seg = r.json()
     assert seg["video_url"].startswith("http")
     assert seg["status"] == "pending"
+    # New segment-model fields
+    for k in ("parent_segment_id", "start_second", "duration", "expand_mode", "continuity_prompt"):
+        assert k in seg, f"missing {k}"
+    # initial segment may or may not be the very first; assert shape only
+    assert seg["duration"] == 5
+    assert isinstance(seg["start_second"], int)
+    assert seg["expand_mode"] in ("initial", "expand")
 
     r2 = _retry(lambda: s.post(f"{API}/scenes/{scene_id}/expand"))
     assert r2.status_code == 200
+    seg2 = r2.json()
+    assert seg2["expand_mode"] == "expand"
+    # Expansion must reference an existing parent and continue from prior end
+    assert seg2["parent_segment_id"] is not None
+    assert seg2["start_second"] >= seg["start_second"] + seg["duration"]
 
-    # approve
+    # approve original
     r3 = s.put(f"{API}/segments/{seg['id']}/status", json={"status": "approved"})
     assert r3.status_code == 200
     assert r3.json()["status"] == "approved"
 
-    # regenerate
+    # regenerate keeps fields and resets to pending
     r4 = _retry(lambda: s.post(f"{API}/segments/{seg['id']}/regenerate"))
     assert r4.status_code == 200
     assert r4.json()["status"] == "pending"
+
+
+def test_expand_chain_links_parents(s, project_id):
+    """A fresh scene + 3 expansions must produce a linked chain with correct
+    start_second progression and parent ids."""
+    r = s.post(f"{API}/projects/{project_id}/scenes", json={"title": "TEST_Chain", "duration": 5})
+    sid = r.json()["id"]
+
+    first = _retry(lambda: s.post(f"{API}/scenes/{sid}/segments",
+                                  json={"continuity_prompt": "moody neon street"}))
+    assert first.status_code == 200, first.text
+    first = first.json()
+    assert first["expand_mode"] == "initial"
+    assert first["parent_segment_id"] is None
+    assert first["start_second"] == 0
+    assert first["continuity_prompt"] == "moody neon street"
+
+    prev = first
+    for i in range(1, 4):
+        r = _retry(lambda: s.post(f"{API}/scenes/{sid}/expand",
+                                  json={"continuity_prompt": f"continuation {i}"}))
+        assert r.status_code == 200, r.text
+        cur = r.json()
+        assert cur["expand_mode"] == "expand"
+        assert cur["parent_segment_id"] == prev["id"]
+        assert cur["start_second"] == prev["start_second"] + prev["duration"]
+        assert cur["order"] == prev["order"] + 1
+        assert cur["duration"] == 5
+        assert cur["continuity_prompt"] == f"continuation {i}"
+        prev = cur
+
+    # cleanup
+    s.delete(f"{API}/scenes/{sid}")
 
 
 # ---------- Cost ----------
