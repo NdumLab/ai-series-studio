@@ -104,4 +104,5 @@ export const Admin = {
     api.get(`/admin/provider-activity?limit=${limit}`).then((r) => r.data),
   providerHealth: (windowMinutes = 60) =>
     api.get(`/admin/provider-health?window_minutes=${windowMinutes}`).then((r) => r.data),
+  deletedProjects: () => api.get("/admin/deleted-projects").then((r) => r.data),
 };

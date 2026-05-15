@@ -533,6 +533,57 @@ Stopped before Phase 2B real-LLM wiring per user. The next milestone is the **Em
 - Real provider plug-ins for non-LLM modalities behind feature flags + at-rest secrets store.
 
 
+## Iteration 23 (2026-02) — Background purge scheduler + Admin "Recently Deleted" panel
+**Goal**: close out the safe-delete feature with automatic cleanup + an ops view that lets admins restore mistakes that slip past the 5-second toast.
+
+### Backend
+- **Shared helper** `_purge_expired_projects_now()` extracted from the admin endpoint. Cascades projects/scenes/characters/segments + scoped `provider_activity` rows for any project where `deleted_at != null` and `delete_expires_at <= now`. Returns counts dict (no `ok` wrapper).
+- **Background scheduler** wired into FastAPI startup:
+  - Initial purge runs once on boot.
+  - Then sleeps for `DELETED_PROJECT_PURGE_INTERVAL_MINUTES` (default `60`, env-tunable) and repeats.
+  - Setting the env var to `0` disables the scheduler (useful for tests).
+  - Implemented as a single `asyncio.create_task(_loop())`; exception in either the initial purge or the loop is caught + logged so a transient Mongo blip cannot crash the app.
+  - Shutdown handler cancels the task and awaits its `CancelledError`.
+  - Log lines never emit project ids, only counts — keeps logs safe-metadata only.
+- **New endpoint** `GET /api/admin/deleted-projects` — returns soft-deleted projects still inside their restore window (`delete_expires_at > now`), sorted by `deleted_at` desc, with child counts (`scenes_count`, `characters_count`, `segments_count`) and the prior status for context.
+
+### Frontend
+- `lib/api.js` — added `Admin.deletedProjects()`.
+- `Admin.jsx`:
+  - New tab **Recently Deleted** with a count badge (red pill) when the panel has items.
+  - Columns: Title · Deleted at · Restore until · Scenes · Characters · Segments · Restore button.
+  - Restore button calls `Projects.restore(id)`, removes the row optimistically, decrements the count badge, and shows a `Restored "X"` toast (`data-testid="admin-project-restore-toast"`).
+  - Empty state: friendly card when nothing is in the window.
+  - Refresh button to re-pull the list on demand.
+
+### Tests — **119/119 backend** (was 116, +3 new)
+- `test_admin_deleted_projects_lists_unexpired_only` — seeds two soft-deleted projects, force-expires one, asserts only the fresh one is in `/admin/deleted-projects` and the row carries the correct counts (6 scenes / 2 characters / 2 segments) plus a `delete_expires_at > deleted_at` invariant.
+- `test_admin_deleted_projects_restore_round_trip` — soft-delete → endpoint shows it → POST /restore → endpoint excludes it → main `/api/projects` listing includes it again.
+- `test_purge_helper_only_purges_expired_deleted_projects` — three projects (active, fresh-soft, expired-soft). After purge: active intact (visible via API), fresh-soft intact in Mongo (still within 24h), expired-soft fully cascaded (project + 6 scenes + 2 chars + 2 segments all gone, restore returns 404).
+
+### Config
+- New env var `DELETED_PROJECT_PURGE_INTERVAL_MINUTES=60` added to `backend/.env`. Read via `_int_env` so misconfigurations don't crash startup.
+
+### Mock-only invariants — re-verified
+- No real-network code touched. `providers/` package unchanged.
+- All five non-LLM `USE_REAL_*_PROVIDER` flags remain `false`. No API key inputs. No Stripe. No auth.
+
+### Files changed (4)
+**Modified**:
+- `backend/server.py` — `asyncio` import, `_purge_expired_projects_now()` helper, `admin_purge_deleted_projects` simplified to call it, new `admin_deleted_projects` endpoint, `_start_purge_scheduler()` + `_purge_task` globals, startup/shutdown wiring.
+- `backend/.env` — `DELETED_PROJECT_PURGE_INTERVAL_MINUTES=60`.
+- `backend/tests/backend_test.py` — 3 new tests (admin listing, restore round-trip, purge helper scoping).
+- `frontend/src/pages/Admin.jsx` — new tab, panel state, restore handler, count badge.
+- `frontend/src/lib/api.js` — `Admin.deletedProjects` added.
+
+### Status checks
+- Backend pytest: **119/119** in 32s.
+- Backend lint: clean.
+- Frontend ESLint: clean.
+- Production build: OK (~191 kB gzip).
+- Admin "Recently Deleted" tab smoke-tested live (renders pre-existing 133 entries from prior test runs, count badge visible, columns + Restore buttons present, no console errors).
+
+
 ## Iteration 21 (2026-02) — Phase 2B: Real LLM provider (LLM modality only)
 **Goal**: ship the first real provider for AI Episode Studio. Strictly LLM-only. All other modalities remain permanently mock-pinned.
 

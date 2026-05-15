@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
-import { Admin as AdminApi } from "../lib/api";
+import { Admin as AdminApi, Projects } from "../lib/api";
+import { toast } from "sonner";
 import {
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
 } from "../components/ui/tabs";
-import { Users, FolderKanban, Sparkles, AlertTriangle, DollarSign, Activity } from "lucide-react";
+import { Users, FolderKanban, Sparkles, AlertTriangle, DollarSign, Activity, Trash2, RotateCcw } from "lucide-react";
 
 export default function Admin() {
   const [stats, setStats] = useState(null);
@@ -16,12 +17,17 @@ export default function Admin() {
   const [failed, setFailed] = useState([]);
   const [activity, setActivity] = useState({ items: [], count: 0 });
   const [health, setHealth] = useState({ window_minutes: 60, modalities: [] });
+  const [deleted, setDeleted] = useState({ items: [], count: 0 });
 
   const loadActivity = () =>
     AdminApi.providerActivity(50).then((d) =>
       setActivity({ items: d.items || [], count: d.count || 0 })
     );
   const loadHealth = () => AdminApi.providerHealth().then(setHealth);
+  const loadDeleted = () =>
+    AdminApi.deletedProjects().then((d) =>
+      setDeleted({ items: d.items || [], count: d.count || 0 })
+    );
 
   useEffect(() => {
     AdminApi.stats().then(setStats);
@@ -31,7 +37,24 @@ export default function Admin() {
     AdminApi.failedJobs().then(setFailed);
     loadActivity();
     loadHealth();
+    loadDeleted();
   }, []);
+
+  const onRestore = async (project) => {
+    try {
+      await Projects.restore(project.id);
+      setDeleted((prev) => ({
+        count: Math.max(0, prev.count - 1),
+        items: prev.items.filter((p) => p.id !== project.id),
+      }));
+      toast.success(`Restored "${project.title}"`, {
+        id: `admin-restore-${project.id}`,
+        "data-testid": "admin-project-restore-toast",
+      });
+    } catch {
+      toast.error("Restore failed");
+    }
+  };
 
   return (
     <div className="es-fade">
@@ -66,6 +89,19 @@ export default function Admin() {
           <TabsTrigger value="provider-activity" data-testid="admin-tab-provider-activity">
             <span className="inline-flex items-center gap-1.5">
               <Activity className="w-3.5 h-3.5" /> Provider activity
+            </span>
+          </TabsTrigger>
+          <TabsTrigger value="deleted" data-testid="admin-tab-deleted">
+            <span className="inline-flex items-center gap-1.5">
+              <Trash2 className="w-3.5 h-3.5" /> Recently Deleted
+              {deleted.count > 0 && (
+                <span
+                  className="ml-1 px-1.5 py-0.5 rounded-full bg-[#FF3B30]/20 text-[#FF3B30] text-[10px] font-mono"
+                  data-testid="admin-deleted-count-badge"
+                >
+                  {deleted.count}
+                </span>
+              )}
             </span>
           </TabsTrigger>
         </TabsList>
@@ -163,6 +199,75 @@ export default function Admin() {
             ])}
             testId="admin-provider-activity-table"
           />
+        </TabsContent>
+
+        <TabsContent value="deleted" className="mt-4">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs text-[#A1A1AA]">
+              Soft-deleted projects inside their 24h restore window. After the
+              window passes, the background purge cleans them up permanently.
+            </p>
+            <button
+              type="button"
+              onClick={loadDeleted}
+              data-testid="admin-deleted-refresh"
+              className="text-xs px-3 py-1.5 rounded-md border border-white/15 text-white hover:bg-white/5"
+            >
+              Refresh
+            </button>
+          </div>
+          {deleted.items.length === 0 ? (
+            <div
+              className="es-card p-8 text-center text-sm text-[#A1A1AA]"
+              data-testid="admin-deleted-empty"
+            >
+              Nothing here — no projects are currently in the restore window.
+            </div>
+          ) : (
+            <div className="overflow-x-auto" data-testid="admin-deleted-table">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left">
+                    {["Title", "Deleted at", "Restore until", "Scenes", "Characters", "Segments", ""].map((h) => (
+                      <th key={h} className="es-label py-2 pr-4 border-b border-white/10">
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {deleted.items.map((p) => (
+                    <tr
+                      key={p.id}
+                      className="border-b border-white/5 hover:bg-white/5"
+                      data-testid={`admin-deleted-row-${p.id}`}
+                    >
+                      <td className="py-2.5 pr-4 text-white font-medium">{p.title || "(untitled)"}</td>
+                      <td className="py-2.5 pr-4 text-[#A1A1AA] font-mono text-xs">
+                        {p.deleted_at ? new Date(p.deleted_at).toLocaleString() : "—"}
+                      </td>
+                      <td className="py-2.5 pr-4 text-[#A1A1AA] font-mono text-xs">
+                        {p.delete_expires_at ? new Date(p.delete_expires_at).toLocaleString() : "—"}
+                      </td>
+                      <td className="py-2.5 pr-4 text-[#A1A1AA] font-mono">{p.scenes_count}</td>
+                      <td className="py-2.5 pr-4 text-[#A1A1AA] font-mono">{p.characters_count}</td>
+                      <td className="py-2.5 pr-4 text-[#A1A1AA] font-mono">{p.segments_count}</td>
+                      <td className="py-2.5 pr-4 text-right">
+                        <button
+                          type="button"
+                          onClick={() => onRestore(p)}
+                          data-testid={`admin-restore-btn-${p.id}`}
+                          className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-white/15 text-white hover:bg-white/10"
+                        >
+                          <RotateCcw className="w-3 h-3" /> Restore
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </TabsContent>
       </Tabs>
     </div>

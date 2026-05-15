@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
+import asyncio
 import logging
 import random
 from pathlib import Path
@@ -1704,12 +1705,13 @@ async def admin_failed_jobs():
     return await db.generations.find({"status": "failed"}, {"_id": 0}).sort("created_at", -1).to_list(200)
 
 
-@api.post("/admin/purge-deleted-projects")
-async def admin_purge_deleted_projects():
+async def _purge_expired_projects_now() -> dict:
     """Permanently remove soft-deleted projects whose delete_expires_at has passed.
 
-    Cascade-deletes the project + its scenes + characters + segments.
-    Provider activity rows scoped to those project_ids are also dropped.
+    Shared by `POST /api/admin/purge-deleted-projects` (manual) and the
+    background scheduler. Cascades to scenes/characters/segments and drops
+    `provider_activity` rows scoped to those project_ids.
+    Returns the purge-count dict.
     """
     now_iso_str = datetime.now(timezone.utc).isoformat()
     expired = await db.projects.find(
@@ -1718,25 +1720,55 @@ async def admin_purge_deleted_projects():
     ).to_list(1000)
     project_ids = [p["id"] for p in expired]
     if not project_ids:
-        return {
-            "ok": True,
-            "purged": {"projects": 0, "scenes": 0, "characters": 0, "segments": 0},
-        }
+        return {"projects": 0, "scenes": 0, "characters": 0, "segments": 0}
     proj_res = await db.projects.delete_many({"id": {"$in": project_ids}})
     scenes_res = await db.scenes.delete_many({"project_id": {"$in": project_ids}})
     chars_res = await db.characters.delete_many({"project_id": {"$in": project_ids}})
     segs_res = await db.segments.delete_many({"project_id": {"$in": project_ids}})
-    # Safe-metadata-only provider activity for these projects too.
     await db.provider_activity.delete_many({"project_id": {"$in": project_ids}})
     return {
-        "ok": True,
-        "purged": {
-            "projects": proj_res.deleted_count,
-            "scenes": scenes_res.deleted_count,
-            "characters": chars_res.deleted_count,
-            "segments": segs_res.deleted_count,
-        },
+        "projects": proj_res.deleted_count,
+        "scenes": scenes_res.deleted_count,
+        "characters": chars_res.deleted_count,
+        "segments": segs_res.deleted_count,
     }
+
+
+@api.post("/admin/purge-deleted-projects")
+async def admin_purge_deleted_projects():
+    """Permanently remove soft-deleted projects whose delete_expires_at has passed."""
+    purged = await _purge_expired_projects_now()
+    return {"ok": True, "purged": purged}
+
+
+@api.get("/admin/deleted-projects")
+async def admin_deleted_projects():
+    """Soft-deleted projects still inside the restore window (delete_expires_at > now).
+
+    Returns child counts per project so the admin panel can show them at-a-glance.
+    """
+    now_iso_str = datetime.now(timezone.utc).isoformat()
+    rows = await db.projects.find(
+        {"deleted_at": {"$ne": None}, "delete_expires_at": {"$gt": now_iso_str}},
+        {"_id": 0},
+    ).sort("deleted_at", -1).to_list(500)
+    items = []
+    for p in rows:
+        pid = p["id"]
+        scenes_count = await db.scenes.count_documents({"project_id": pid})
+        chars_count = await db.characters.count_documents({"project_id": pid})
+        segs_count = await db.segments.count_documents({"project_id": pid})
+        items.append({
+            "id": pid,
+            "title": p.get("title", ""),
+            "deleted_at": p.get("deleted_at"),
+            "delete_expires_at": p.get("delete_expires_at"),
+            "previous_status": p.get("previous_status"),
+            "scenes_count": scenes_count,
+            "characters_count": chars_count,
+            "segments_count": segs_count,
+        })
+    return {"count": len(items), "items": items}
 
 
 @api.get("/admin/provider-activity")
@@ -1818,7 +1850,46 @@ app.add_middleware(
 async def startup_event():
     await ensure_default_user()
     await _backfill_creative_quality()
+    # Background purge of expired soft-deleted projects.
+    await _start_purge_scheduler()
     log.info("AI Episode Studio backend ready")
+
+
+_purge_task: Optional[asyncio.Task] = None
+
+
+async def _start_purge_scheduler() -> None:
+    """Spawn the periodic purge loop. Runs an initial purge on boot, then
+    every `DELETED_PROJECT_PURGE_INTERVAL_MINUTES` minutes (default 60).
+    Set the interval to 0 to disable the scheduler entirely (tests can do this)."""
+    global _purge_task
+    interval_min = _int_env("DELETED_PROJECT_PURGE_INTERVAL_MINUTES", 60)
+    if interval_min <= 0:
+        log.info("Purge scheduler disabled (interval=%s)", interval_min)
+        return
+    if _purge_task is not None and not _purge_task.done():
+        return  # already running
+
+    async def _loop():
+        # Initial purge on boot — runs once before the wait loop.
+        try:
+            purged = await _purge_expired_projects_now()
+            if any(v > 0 for v in purged.values()):
+                log.info("Startup purge: %s", purged)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Startup purge failed: %s", exc)
+        while True:
+            try:
+                await asyncio.sleep(interval_min * 60)
+                purged = await _purge_expired_projects_now()
+                if any(v > 0 for v in purged.values()):
+                    log.info("Scheduled purge: %s", purged)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Scheduled purge failed: %s", exc)
+
+    _purge_task = asyncio.create_task(_loop())
 
 
 async def _backfill_creative_quality():
@@ -1867,4 +1938,12 @@ async def _backfill_creative_quality():
 
 @app.on_event("shutdown")
 async def shutdown_event():
+    global _purge_task
+    if _purge_task is not None and not _purge_task.done():
+        _purge_task.cancel()
+        try:
+            await _purge_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        _purge_task = None
     client.close()

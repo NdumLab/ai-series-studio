@@ -1380,6 +1380,96 @@ def test_delete_then_restore_is_idempotent(s):
         _hard_purge_via_mongo(pid)
 
 
+# ---------- Admin Recently Deleted panel + scheduler ----------
+def test_admin_deleted_projects_lists_unexpired_only(s):
+    fresh_pid = _seed_full_project(s, "TEST_ADMIN_DEL_FRESH")
+    expired_pid = _seed_full_project(s, "TEST_ADMIN_DEL_EXPIRED")
+    try:
+        s.delete(f"{API}/projects/{fresh_pid}")
+        s.delete(f"{API}/projects/{expired_pid}")
+        # Force the second project's window into the past.
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        dbh = _direct_db()
+        past_iso = (_dt.now(_tz.utc) - _td(hours=1)).isoformat()
+        dbh.projects.update_one(
+            {"id": expired_pid}, {"$set": {"delete_expires_at": past_iso}}
+        )
+        body = s.get(f"{API}/admin/deleted-projects").json()
+        ids = [row["id"] for row in body["items"]]
+        assert fresh_pid in ids
+        assert expired_pid not in ids
+        # Row shape for the fresh entry includes counts.
+        fresh_row = next(r for r in body["items"] if r["id"] == fresh_pid)
+        assert fresh_row["title"] == "TEST_ADMIN_DEL_FRESH"
+        assert fresh_row["scenes_count"] == 6
+        assert fresh_row["characters_count"] == 2
+        assert fresh_row["segments_count"] == 2
+        assert fresh_row["delete_expires_at"] > fresh_row["deleted_at"]
+    finally:
+        _hard_purge_via_mongo(fresh_pid)
+        _hard_purge_via_mongo(expired_pid)
+
+
+def test_admin_deleted_projects_restore_round_trip(s):
+    pid = _seed_full_project(s, "TEST_ADMIN_DEL_RESTORE")
+    try:
+        s.delete(f"{API}/projects/{pid}")
+        before = s.get(f"{API}/admin/deleted-projects").json()
+        assert any(r["id"] == pid for r in before["items"])
+        r = s.post(f"{API}/projects/{pid}/restore")
+        assert r.status_code == 200
+        after = s.get(f"{API}/admin/deleted-projects").json()
+        assert all(r["id"] != pid for r in after["items"])
+        # Project is back in the main listing
+        listing = s.get(f"{API}/projects").json()
+        assert any(p["id"] == pid for p in listing)
+    finally:
+        _hard_purge_via_mongo(pid)
+
+
+def test_purge_helper_only_purges_expired_deleted_projects(s):
+    """The shared `_purge_expired_projects_now` helper (used by both the
+    scheduler and the admin endpoint) must:
+      - purge expired soft-deleted projects (cascades scenes/chars/segments)
+      - leave non-expired soft-deleted projects alone
+      - leave active projects alone
+    """
+    active = _seed_full_project(s, "TEST_PURGE_HELPER_ACTIVE")
+    fresh = _seed_full_project(s, "TEST_PURGE_HELPER_FRESH_SOFT")
+    expired = _seed_full_project(s, "TEST_PURGE_HELPER_EXPIRED_SOFT")
+    try:
+        s.delete(f"{API}/projects/{fresh}")
+        s.delete(f"{API}/projects/{expired}")
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        dbh = _direct_db()
+        past_iso = (_dt.now(_tz.utc) - _td(hours=1)).isoformat()
+        dbh.projects.update_one(
+            {"id": expired}, {"$set": {"delete_expires_at": past_iso}}
+        )
+        r = s.post(f"{API}/admin/purge-deleted-projects")
+        body = r.json()
+        assert body["ok"] is True
+        # Expired project is fully gone in Mongo
+        assert dbh.projects.count_documents({"id": expired}) == 0
+        assert dbh.scenes.count_documents({"project_id": expired}) == 0
+        assert dbh.characters.count_documents({"project_id": expired}) == 0
+        assert dbh.segments.count_documents({"project_id": expired}) == 0
+        # Active project and child rows intact
+        assert dbh.projects.count_documents({"id": active}) == 1
+        assert dbh.scenes.count_documents({"project_id": active}) == 6
+        # Fresh soft-deleted project still alive (waiting for its 24h window)
+        assert dbh.projects.count_documents({"id": fresh}) == 1
+        assert dbh.scenes.count_documents({"project_id": fresh}) == 6
+        # Active project is still reachable via API
+        assert s.get(f"{API}/projects/{active}").status_code == 200
+        # Restore on the purged id must fail with 404 (it's truly gone).
+        assert s.post(f"{API}/projects/{expired}/restore").status_code == 404
+    finally:
+        _hard_purge_via_mongo(active)
+        _hard_purge_via_mongo(fresh)
+        _hard_purge_via_mongo(expired)
+
+
 # ---------- Phase 2A unified provider endpoints ----------
 def test_unified_providers_test_returns_mock_response(s):
     r = s.post(f"{API}/providers/test", json={"modality": "image"})
