@@ -120,11 +120,14 @@ export default function ProjectStudio() {
     return () => clearTimeout(t);
   }, [costDelta]);
 
-  const reloadAll = useCallback(() => {
-    load();
-    loadVoiceRes();
-    loadSceneCosts({ trackDelta: true });
-  }, [load, loadVoiceRes, loadSceneCosts]);
+  const reloadAll = useCallback(
+    (opts = {}) => {
+      if (!opts.skipProject) load();
+      loadVoiceRes();
+      loadSceneCosts({ trackDelta: true });
+    },
+    [load, loadVoiceRes, loadSceneCosts]
+  );
 
   useEffect(() => {
     load();
@@ -211,6 +214,7 @@ export default function ProjectStudio() {
             options={options}
             voiceResolution={voiceRes}
             sceneCosts={sceneCosts}
+            setData={setData}
             reload={reloadAll}
           />
         </TabsContent>
@@ -236,6 +240,7 @@ export default function ProjectStudio() {
             scenes={scenes}
             providers={providers}
             options={options}
+            setData={setData}
             reload={reloadAll}
           />
         </TabsContent>
@@ -573,7 +578,7 @@ function StoryTab({ project, providers, options, reload, onContinue }) {
 // ---------------------------------------------------------------------------
 // Scenes tab — text/structure editing only (no media generation here)
 // ---------------------------------------------------------------------------
-function ScenesTab({ project, scenes, characters, options, voiceResolution, sceneCosts, reload }) {
+function ScenesTab({ project, scenes, characters, options, voiceResolution, sceneCosts, setData, reload }) {
   if (!scenes.length) {
     return (
       <div className="es-card p-12 text-center">
@@ -622,11 +627,18 @@ function ScenesTab({ project, scenes, characters, options, voiceResolution, scen
         getId={(s) => s.id}
         testId="sortable-scenes"
         onReorder={async (ids) => {
+          // Optimistic: reorder locally first
+          const byId = new Map(scenes.map((s) => [s.id, s]));
+          const next = ids.map((id, i) => ({ ...byId.get(id), order: i }));
+          const prev = scenes;
+          setData((d) => (d ? { ...d, scenes: next } : d));
           try {
             await Scenes.reorder(project.id, ids);
-            reload();
+            // Quietly refresh derived data (cost-costs etc.) without snapping the list
+            reload({ skipProject: true });
           } catch {
-            toast.error("Reorder failed");
+            setData((d) => (d ? { ...d, scenes: prev } : d));
+            toast.error("Reorder failed — restored");
           }
         }}
         renderItem={(s, handle) => (
@@ -639,6 +651,7 @@ function ScenesTab({ project, scenes, characters, options, voiceResolution, scen
             costRow={sceneCostMap[s.id]}
             highCostThreshold={threshold}
             dragHandle={handle}
+            setData={setData}
             reload={reload}
           />
         )}
@@ -1020,7 +1033,7 @@ function SceneImageCard({ scene, index, reload }) {
 // ---------------------------------------------------------------------------
 // Video Segments tab
 // ---------------------------------------------------------------------------
-function SegmentsTab({ scenes, providers, options, reload }) {
+function SegmentsTab({ scenes, providers, options, setData, reload }) {
   if (!scenes.length) {
     return <EmptyState text="Split your story into scenes first." />;
   }
@@ -1033,9 +1046,15 @@ function SegmentsTab({ scenes, providers, options, reload }) {
         action="video generation"
         credits={c ? `~${c} credits per 5-second segment` : null}
       />
-      <InfoCallout text="Each scene contains 5-second video segments. Use 'Expand next 5s' to chain a continuation that references the previous segment." />
+      <InfoCallout text="Each scene contains 5-second video segments. Use 'Expand next 5s' to chain a continuation that references the previous segment. Drag a segment's grip handle to reorder." />
       {scenes.map((s, i) => (
-        <SceneSegmentBlock key={s.id} scene={s} index={i} reload={reload} />
+        <SceneSegmentBlock
+          key={s.id}
+          scene={s}
+          index={i}
+          setData={setData}
+          reload={reload}
+        />
       ))}
     </div>
   );
@@ -1116,11 +1135,43 @@ function SceneSegmentBlock({ scene, index, reload }) {
           direction="grid"
           testId={`sortable-segments-${scene.id}`}
           onReorder={async (ids) => {
+            const prev = segments;
+            const byId = new Map(segments.map((s) => [s.id, s]));
+            // Optimistic local update with recomputed start_second
+            let start = 0;
+            const next = ids.map((id, i) => {
+              const seg = byId.get(id);
+              const dur = seg?.duration ?? 5;
+              const updated = { ...seg, order: i, start_second: start };
+              start += dur;
+              return updated;
+            });
+            setData?.((d) =>
+              d
+                ? {
+                    ...d,
+                    scenes: d.scenes.map((sc) =>
+                      sc.id === scene.id ? { ...sc, segments: next } : sc
+                    ),
+                  }
+                : d
+            );
             try {
               await Scenes.reorderSegments(scene.id, ids);
-              reload();
+              // refresh derived data (cost-costs) without resetting the list
+              reload({ skipProject: true });
             } catch {
-              toast.error("Reorder failed");
+              setData?.((d) =>
+                d
+                  ? {
+                      ...d,
+                      scenes: d.scenes.map((sc) =>
+                        sc.id === scene.id ? { ...sc, segments: prev } : sc
+                      ),
+                    }
+                  : d
+              );
+              toast.error("Reorder failed — restored");
             }
           }}
           renderItem={(seg, handle, i) => (
