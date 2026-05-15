@@ -816,11 +816,19 @@ async def update_project(project_id: str, body: ProjectUpdate):
 
 @api.delete("/projects/{project_id}")
 async def delete_project(project_id: str):
-    await db.projects.delete_one({"id": project_id})
-    await db.scenes.delete_many({"project_id": project_id})
-    await db.characters.delete_many({"project_id": project_id})
-    await db.segments.delete_many({"project_id": project_id})
-    return {"ok": True}
+    proj_res = await db.projects.delete_one({"id": project_id})
+    scenes_res = await db.scenes.delete_many({"project_id": project_id})
+    chars_res = await db.characters.delete_many({"project_id": project_id})
+    segs_res = await db.segments.delete_many({"project_id": project_id})
+    return {
+        "ok": True,
+        "deleted": {
+            "projects": proj_res.deleted_count,
+            "scenes": scenes_res.deleted_count,
+            "characters": chars_res.deleted_count,
+            "segments": segs_res.deleted_count,
+        },
+    }
 
 
 @api.post("/projects/{project_id}/rewrite")

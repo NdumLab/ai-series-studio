@@ -225,7 +225,6 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 5 · voice 1
 
 ## Backlog (P1) — refreshed
 - Character drag handles in Cast view (deferred from iteration 12; requires `order` field on Character model + `PUT /api/projects/{id}/characters/reorder`).
-- Cascade-delete segments when their parent project is deleted (`server.py` `delete_project` carry-over).
 - Real provider plug-ins behind feature flags: LLM, image, video, voice, music, export.
 - API key inputs + storage (locked until real-provider mode is activated).
 
@@ -235,3 +234,17 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 5 · voice 1
 - Public project sharing with watermark.
 - Multi-tenant teams with role-based admin.
 - Versioned scene revisions / undo.
+
+
+## Iteration 14 (2026-02) — Project cascade-delete with counts
+- `DELETE /api/projects/{project_id}` now returns deletion counts and is fully cascaded across the four collections:
+  ```json
+  { "ok": true, "deleted": { "projects": 1, "scenes": 6, "characters": 3, "segments": 12 } }
+  ```
+- Deletes by `project_id` on `scenes`, `characters`, and `segments` (segments already carry `project_id` so the cleanup is one-shot — no need to fan-out via scene IDs).
+- Deleting a non-existent project remains a safe `200 ok` with all counts at `0`, preserving the existing API DELETE convention.
+- Tests: **62/62 backend cases pass.** Added 3 cases:
+  - `test_delete_project_cascades_scenes_characters_segments` (6 scenes + 2 chars + 2 segments fully removed; subsequent GET → 404; export → 404)
+  - `test_delete_project_does_not_touch_other_projects` (deleting project A leaves project B's scenes / characters / segments intact)
+  - `test_delete_unknown_project_is_safe` (unknown project → `{ok: true, deleted: all zeros}`)
+- Mock-only invariants preserved; no real provider wiring, no API key fields, no Stripe.

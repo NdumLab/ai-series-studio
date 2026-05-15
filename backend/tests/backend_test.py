@@ -1199,3 +1199,92 @@ def test_existing_expand_and_costs_still_work_after_reorder(s):
         assert row["total_credits"] == 2 + 12 * 2 + 1
     finally:
         s.delete(f"{API}/projects/{pid}")
+
+
+
+# ---------- Cascade delete ----------
+def _seed_full_project(s, title):
+    """Create a project with scenes, characters, and segments. Returns (pid, ids)."""
+    r = s.post(f"{API}/projects", json={"title": title, "idea": "A small experiment for cascade testing"})
+    pid = r.json()["id"]
+    # rewrite + split → 6 scenes
+    s.post(f"{API}/projects/{pid}/rewrite")
+    s.post(f"{API}/projects/{pid}/split-scenes")
+    proj = s.get(f"{API}/projects/{pid}").json()
+    scene_id = proj["scenes"][0]["id"]
+    # 2 characters
+    for n in ("Alice", "Bob"):
+        s.post(
+            f"{API}/projects/{pid}/characters",
+            json={"name": n, "description": "test", "voice_style": "Narrator-Warm"},
+        )
+    # 2 segments on the first scene (initial + expand)
+    _retry(lambda: s.post(f"{API}/scenes/{scene_id}/segments"))
+    _retry(lambda: s.post(f"{API}/scenes/{scene_id}/expand"))
+    return pid
+
+
+def test_delete_project_cascades_scenes_characters_segments(s):
+    pid = _seed_full_project(s, "TEST_CASCADE")
+
+    r = s.delete(f"{API}/projects/{pid}")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is True
+    d = body["deleted"]
+    assert d["projects"] == 1
+    assert d["scenes"] == 6
+    assert d["characters"] == 2
+    assert d["segments"] == 2
+
+    # Project gone
+    assert s.get(f"{API}/projects/{pid}").status_code == 404
+    # No scenes / segments / characters can be discovered via downstream endpoints
+    # (export should also fail since the project no longer exists)
+    assert s.get(f"{API}/projects/{pid}/export").status_code == 404
+
+
+def test_delete_project_does_not_touch_other_projects(s):
+    pid_a = _seed_full_project(s, "TEST_CASCADE_A")
+    pid_b = _seed_full_project(s, "TEST_CASCADE_B")
+
+    try:
+        # Sanity: B has its scenes and characters before delete of A
+        before_b = s.get(f"{API}/projects/{pid_b}").json()
+        assert len(before_b["scenes"]) == 6
+        assert len(before_b["characters"]) == 2
+        seg_id_b = before_b["scenes"][0]["segments"][0]["id"] if before_b["scenes"][0].get("segments") else None
+
+        # Delete A
+        r = s.delete(f"{API}/projects/{pid_a}")
+        assert r.status_code == 200
+        d = r.json()["deleted"]
+        assert d["projects"] == 1 and d["scenes"] == 6 and d["characters"] == 2 and d["segments"] == 2
+
+        # B is fully intact
+        after_b = s.get(f"{API}/projects/{pid_b}").json()
+        assert len(after_b["scenes"]) == 6
+        assert len(after_b["characters"]) == 2
+        # The segment that existed on B before is still listed under its scene
+        scenes_with_segs = [sc for sc in after_b["scenes"] if sc.get("segments")]
+        assert scenes_with_segs, "Project B's segments should not be affected by deleting Project A"
+        if seg_id_b:
+            still_there = any(
+                seg["id"] == seg_id_b for sc in after_b["scenes"] for seg in sc.get("segments", [])
+            )
+            assert still_there
+    finally:
+        s.delete(f"{API}/projects/{pid_b}")
+
+
+def test_delete_unknown_project_is_safe(s):
+    r = s.delete(f"{API}/projects/does-not-exist-xxxx")
+    # API convention for missing DELETEs is a 200 ok-response with zero counts
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is True
+    d = body["deleted"]
+    assert d["projects"] == 0
+    assert d["scenes"] == 0
+    assert d["characters"] == 0
+    assert d["segments"] == 0
