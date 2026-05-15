@@ -23,6 +23,7 @@ import {
   PlugZap,
   ShieldAlert,
   KeyRound,
+  AlertCircle,
 } from "lucide-react";
 import {
   Tabs,
@@ -285,10 +286,65 @@ function StageProgress({ current, onJump }) {
 }
 
 // ---------------------------------------------------------------------------
-// Cost badge (live, backed by /scene-costs)
+// Cost badge (live, backed by /scene-costs) + Wallet ring
 // ---------------------------------------------------------------------------
+const WALLET_STATE_COLOR = {
+  normal: "#34C759",
+  warning: "#FFCC00",
+  high: "#FF9500",
+  insufficient: "#FF3B30",
+};
+
+function WalletRing({ pct, state, walletCredits, totalCredits }) {
+  const radius = 18;
+  const stroke = 4;
+  const c = 2 * Math.PI * radius;
+  const clamped = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
+  const dash = (clamped / 100) * c;
+  const color = WALLET_STATE_COLOR[state] || WALLET_STATE_COLOR.normal;
+  const tooltip = `This episode would use about ${Math.round(pct)}% of your available ${walletCredits} credits.`;
+  return (
+    <div
+      className="flex flex-col items-center"
+      title={tooltip}
+      data-testid="wallet-ring"
+      data-state={state}
+    >
+      <svg width="48" height="48" viewBox="0 0 48 48" className="rotate-[-90deg]">
+        <circle
+          cx="24"
+          cy="24"
+          r={radius}
+          stroke="rgba(255,255,255,0.08)"
+          strokeWidth={stroke}
+          fill="none"
+        />
+        <circle
+          cx="24"
+          cy="24"
+          r={radius}
+          stroke={color}
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          fill="none"
+          strokeDasharray={`${dash} ${c}`}
+          style={{ transition: "stroke-dasharray 350ms ease, stroke 200ms ease" }}
+        />
+      </svg>
+      <span
+        className="text-[10px] font-mono mt-0.5"
+        style={{ color }}
+        data-testid="wallet-ring-pct"
+      >
+        {Math.round(pct)}%
+      </span>
+    </div>
+  );
+}
+
 function CostBadge({ sceneCosts }) {
   let body;
+  let ring = null;
   if (sceneCosts.status === "loading" && !sceneCosts.data) {
     body = (
       <div className="font-display text-lg font-bold text-[#A1A1AA]" data-testid="cost-badge-loading">
@@ -302,20 +358,46 @@ function CostBadge({ sceneCosts }) {
       </div>
     );
   } else {
-    const total = sceneCosts.data?.grand_total_credits ?? 0;
+    const d = sceneCosts.data;
+    const total = d?.grand_total_credits ?? 0;
+    const pct = d?.wallet_pct ?? 0;
+    const wallet = d?.wallet_credits ?? 0;
     body = (
-      <div className="font-display text-lg font-bold" data-testid="cost-badge-total">
-        ~{total} <span className="text-xs text-[#A1A1AA] font-mono">credits</span>
+      <div data-testid="cost-badge-total">
+        <div className="font-display text-lg font-bold leading-tight">
+          ~{total} <span className="text-xs text-[#A1A1AA] font-mono">credits</span>
+        </div>
+        {wallet ? (
+          <div
+            className="text-[10px] font-mono"
+            style={{ color: WALLET_STATE_COLOR[d.wallet_state] || "#A1A1AA" }}
+            data-testid="wallet-pct-line"
+          >
+            {Math.round(pct)}% of wallet
+            {d.wallet_state === "insufficient" && " · insufficient credits"}
+          </div>
+        ) : null}
       </div>
     );
+    if (wallet) {
+      ring = (
+        <WalletRing
+          pct={pct}
+          state={d.wallet_state}
+          walletCredits={wallet}
+          totalCredits={total}
+        />
+      );
+    }
   }
   return (
-    <div className="es-card px-4 py-3 inline-flex items-center gap-3" data-testid="cost-estimate">
+    <div className="es-card px-4 py-2.5 inline-flex items-center gap-3" data-testid="cost-estimate">
       <Coins className="w-4 h-4 text-[#FFCC00]" />
       <div>
         <div className="es-label">Project scene cost</div>
         {body}
       </div>
+      {ring}
     </div>
   );
 }
@@ -465,6 +547,11 @@ function ScenesTab({ project, scenes, characters, options, voiceResolution, scen
   if (sceneCosts?.status === "loading" && !sceneCosts.data) totalText = "calculating…";
   else if (sceneCosts?.status === "error") totalText = "estimate unavailable";
   else if (sceneCosts?.data) totalText = `~${sceneCosts.data.grand_total_credits} credits`;
+  const sceneCostMap = {};
+  (sceneCosts?.data?.scenes || []).forEach((row) => {
+    sceneCostMap[row.scene_id] = row;
+  });
+  const threshold = sceneCosts?.data?.high_cost_scene_threshold_percent ?? 25;
   return (
     <div className="space-y-4" data-testid="scenes-list">
       <div className="flex items-end justify-between flex-wrap gap-3" data-testid="scenes-tab-header">
@@ -497,6 +584,8 @@ function ScenesTab({ project, scenes, characters, options, voiceResolution, scen
           characters={characters}
           options={options}
           voiceResolution={voiceResolution}
+          costRow={sceneCostMap[s.id]}
+          highCostThreshold={threshold}
           reload={reload}
         />
       ))}
@@ -529,7 +618,7 @@ function AddSceneButton({ projectId, reload }) {
   );
 }
 
-function SceneEditor({ index, scene, characters, options, voiceResolution, reload }) {
+function SceneEditor({ index, scene, characters, options, voiceResolution, costRow, highCostThreshold, reload }) {
   const [local, setLocal] = useState(scene);
   useEffect(() => setLocal(scene), [scene]);
   const patch = (k, v) => setLocal((p) => ({ ...p, [k]: v }));
@@ -592,6 +681,16 @@ function SceneEditor({ index, scene, characters, options, voiceResolution, reloa
               </span>
             )}
           </span>
+          {costRow?.high_cost && (
+            <span
+              data-testid={`high-cost-${scene.id}`}
+              title={`This scene uses ~${Math.round(costRow.share_pct)}% of the project's estimated credits.\nImage: ${costRow.breakdown.image} · Video: ${costRow.breakdown.video} · Voice: ${costRow.breakdown.voice}\nConsider reducing segments or using Draft mode.`}
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border border-[#FF9500]/40 bg-[#FF9500]/10 text-[#FF9500] text-[10px] font-mono uppercase tracking-widest"
+            >
+              <AlertCircle className="w-3 h-3" />
+              High-cost scene · {Math.round(costRow.share_pct)}%
+            </span>
+          )}
         </div>
         <Button
           variant="ghost"

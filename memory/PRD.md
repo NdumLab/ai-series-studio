@@ -144,3 +144,20 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 5 · voice 1
 - Backend remains the source of truth — frontend never recomputes the project total locally, only displays/refetches.
 - Tests: 40/40 backend cases passing. Added `test_scene_costs_grand_total_updates_after_expand` (verifies grand_total bumps by exactly `video_segment` cost on expand) and `test_scene_costs_404_for_unknown_project` (so the FE error fallback has a real failure mode).
 - Mock-only invariants preserved.
+
+## Iteration 9 (2026-02) — Wallet ring + High-cost scene warning
+- Backend: new `studio_config()` reads two tunables from env:
+  - `WALLET_CREDITS` (default 250)
+  - `HIGH_COST_SCENE_THRESHOLD_PERCENT` (default 25)
+- New endpoint `GET /api/config` returns both + `mock_mode: true`.
+- `GET /api/projects/{id}/scene-costs` extended with:
+  - `wallet_credits`, `wallet_pct`, `wallet_state` ∈ {`normal` <41, `warning` 41–70, `high` 71–100, `insufficient` >100}
+  - `high_cost_scene_threshold_percent` (echoed for UI display)
+  - per-scene `share_pct` and `high_cost: bool`
+  - Optional query overrides `?wallet_credits=`, `?high_cost_pct=` (lets dev tools/tests drive states without mutating server env).
+- Frontend:
+  - Project header CostBadge gains a **wallet ring** (SVG donut) showing % of seeded 250-credit demo wallet, color-coded by state (green/yellow/orange/red). Tooltip: "This episode would use about X% of your available 250 credits." Hidden gracefully when scene-costs is in error/loading.
+  - Each SceneEditor card gains a calm orange **"High-cost scene · X%"** badge (lucide AlertCircle icon) when `costRow.high_cost === true`. Tooltip text includes share %, the breakdown line and the suggested action ("Consider reducing segments or using Draft mode") — phrased as guidance, not failure.
+  - Threshold value flows via the backend response (`high_cost_scene_threshold_percent`) — never hard-coded in the UI; changing the env var updates everything.
+- Tests: 45/45 backend pass. Added: `test_studio_config_endpoint`, `test_scene_costs_includes_wallet_pct_and_state`, `test_wallet_state_thresholds` (covers normal/warning/high/insufficient via query override incl. >100%), `test_high_cost_scene_flag_with_configurable_threshold` (default 25%, plus overrides 10% / 50%), `test_scene_costs_404_still_works_for_wallet`. Mock mode and feature flags still asserted False.
+- Mock-only invariants preserved.

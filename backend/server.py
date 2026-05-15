@@ -145,6 +145,34 @@ def feature_flags() -> dict:
     out["any_real"] = any(out.values())
     return out
 
+
+def _int_env(key: str, default: int) -> int:
+    try:
+        return int(os.environ.get(key, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def studio_config() -> dict:
+    """User-tunable thresholds. All read at request time so .env changes
+    take effect without a restart."""
+    return {
+        "wallet_credits": _int_env("WALLET_CREDITS", 250),
+        "high_cost_scene_threshold_percent": _int_env(
+            "HIGH_COST_SCENE_THRESHOLD_PERCENT", 25
+        ),
+    }
+
+
+def _wallet_state(pct: float) -> str:
+    if pct > 100:
+        return "insufficient"
+    if pct >= 71:
+        return "high"
+    if pct >= 41:
+        return "warning"
+    return "normal"
+
 DEFAULT_PROVIDER_SETTINGS = {
     "llm": {"provider": "openai", "model": "gpt-5.2", "custom_provider": "", "custom_model": ""},
     "image": {"provider": "fal", "model": "flux-pro", "custom_provider": "", "custom_model": ""},
@@ -421,6 +449,12 @@ async def get_feature_flags():
     return feature_flags()
 
 
+@api.get("/config")
+async def get_studio_config():
+    """Tunable thresholds (wallet credits, high-cost-scene threshold)."""
+    return {**studio_config(), "mock_mode": True}
+
+
 # ---------------------------------------------------------------------------
 # Project provider override (per-project, mock-only)
 # ---------------------------------------------------------------------------
@@ -591,8 +625,15 @@ async def project_voice_resolution(project_id: str):
 
 
 @api.get("/projects/{project_id}/scene-costs")
-async def project_scene_costs(project_id: str):
+async def project_scene_costs(
+    project_id: str,
+    wallet_credits: Optional[int] = None,
+    high_cost_pct: Optional[int] = None,
+):
     """Per-scene credit estimate using the mock COSTS map.
+
+    Optional query params (`wallet_credits`, `high_cost_pct`) let dev tools and
+    tests override the env-configured defaults without mutating server state.
 
     Formula: image + (video_segment * max(1, len(segments))) + voice
     Missing keys degrade gracefully (treated as 0) and the response flags
@@ -605,6 +646,12 @@ async def project_scene_costs(project_id: str):
     image_cost = COSTS.get("image")
     seg_cost = COSTS.get("video_segment")
     voice_cost = COSTS.get("voice")
+    cfg = studio_config()
+    if wallet_credits is None:
+        wallet_credits = cfg["wallet_credits"]
+    if high_cost_pct is None:
+        high_cost_pct = cfg["high_cost_scene_threshold_percent"]
+    high_threshold = high_cost_pct
 
     scenes = await db.scenes.find({"project_id": project_id}, {"_id": 0}).sort("order", 1).to_list(500)
     out = []
@@ -636,11 +683,24 @@ async def project_scene_costs(project_id: str):
             "estimate_unavailable": bool(missing),
             "missing_costs": missing,
         })
+
+    # Wallet share + high-cost flagging — second pass so we know grand_total
+    for row in out:
+        share = (row["total_credits"] / grand_total * 100.0) if grand_total else 0.0
+        row["share_pct"] = round(share, 1)
+        row["high_cost"] = bool(grand_total) and share >= high_threshold
+
+    wallet_pct_raw = (grand_total / wallet_credits * 100.0) if wallet_credits else 0.0
+    wallet_pct = round(wallet_pct_raw, 1)
     return {
         "project_id": project_id,
         "mock_mode": True,
         "unit_costs": {"image": image_cost, "video_segment": seg_cost, "voice": voice_cost},
         "grand_total_credits": grand_total,
+        "wallet_credits": wallet_credits,
+        "wallet_pct": wallet_pct,
+        "wallet_state": _wallet_state(wallet_pct_raw),
+        "high_cost_scene_threshold_percent": high_threshold,
         "scenes": out,
     }
 

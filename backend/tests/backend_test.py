@@ -763,3 +763,126 @@ def test_scene_costs_grand_total_updates_after_expand(s):
 def test_scene_costs_404_for_unknown_project(s):
     r = s.get(f"{API}/projects/does-not-exist/scene-costs")
     assert r.status_code == 404
+
+
+# ---------- Wallet ring + high-cost scenes ----------
+def test_studio_config_endpoint(s):
+    r = s.get(f"{API}/config")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["mock_mode"] is True
+    assert d["wallet_credits"] == 250
+    assert d["high_cost_scene_threshold_percent"] == 25
+
+
+def test_scene_costs_includes_wallet_pct_and_state(s):
+    """Default wallet=250. With 6 mock-split scenes (each 15) → grand 90 → 36% (warning border-line normal)."""
+    p = s.post(f"{API}/projects", json={"title": "TEST_Wallet", "idea": "x"}).json()
+    pid = p["id"]
+    try:
+        s.post(f"{API}/projects/{pid}/rewrite")
+        s.post(f"{API}/projects/{pid}/split-scenes")
+        d = s.get(f"{API}/projects/{pid}/scene-costs").json()
+        assert d["wallet_credits"] == 250
+        assert d["high_cost_scene_threshold_percent"] == 25
+        # 6 scenes × 15 = 90
+        assert d["grand_total_credits"] == 90
+        assert d["wallet_pct"] == 36.0
+        assert d["wallet_state"] == "normal"  # 36% < 41%
+        # Each scene = 15/90 ≈ 16.7% → below 25% → not high-cost
+        for sc in d["scenes"]:
+            assert sc["share_pct"] == round(15 / 90 * 100, 1)
+            assert sc["high_cost"] is False
+        assert d["mock_mode"] is True
+    finally:
+        s.delete(f"{API}/projects/{pid}")
+
+
+def test_wallet_state_thresholds(s):
+    """Drive wallet_state across normal → warning → high → insufficient using the
+    `wallet_credits` query-param override on /scene-costs."""
+    p = s.post(f"{API}/projects", json={"title": "TEST_WalletState", "idea": "x"}).json()
+    pid = p["id"]
+    try:
+        s.post(f"{API}/projects/{pid}/rewrite")
+        s.post(f"{API}/projects/{pid}/split-scenes")  # grand_total = 90
+
+        # Boundaries:
+        #   normal       pct < 41          → wallet > 90/0.41 ≈ 220 → e.g. 250 → 36%
+        #   warning      41 <= pct < 71    → wallet 128..219       → e.g. 180 → 50%
+        #   high         71 <= pct <= 100  → wallet 90..127        → e.g. 100 → 90%
+        #   insufficient pct > 100         → wallet < 90           → e.g. 50  → 180%
+        cases = [
+            (250, "normal"),
+            (180, "warning"),
+            (100, "high"),
+            (50, "insufficient"),
+        ]
+        for wallet, expected in cases:
+            r = s.get(
+                f"{API}/projects/{pid}/scene-costs",
+                params={"wallet_credits": wallet},
+            )
+            d = r.json()
+            assert d["wallet_credits"] == wallet
+            assert d["wallet_state"] == expected, (
+                f"wallet={wallet} got {d['wallet_state']} pct={d['wallet_pct']}"
+            )
+            assert d["mock_mode"] is True
+    finally:
+        s.delete(f"{API}/projects/{pid}")
+
+
+def test_high_cost_scene_flag_with_configurable_threshold(s):
+    """Force a single scene to dominate, then verify the high-cost flag flips
+    only when above the configurable threshold."""
+    p = s.post(f"{API}/projects", json={"title": "TEST_HighCost", "idea": "x"}).json()
+    pid = p["id"]
+    try:
+        s.post(f"{API}/projects/{pid}/rewrite")
+        s.post(f"{API}/projects/{pid}/split-scenes")
+        scenes = s.get(f"{API}/projects/{pid}").json()["scenes"]
+        big = scenes[0]
+        # 4 expansions → 4 segments under big → big total = 2 + 12*4 + 1 = 51
+        # Other 5 scenes stay at 15 each → grand = 51 + 75 = 126
+        # big share = 51/126 ≈ 40.5%, other share = 15/126 ≈ 11.9%
+        for _ in range(4):
+            _retry(lambda: s.post(f"{API}/scenes/{big['id']}/expand"))
+
+        # Default threshold (25%): only big crosses
+        d = s.get(f"{API}/projects/{pid}/scene-costs").json()
+        assert d["high_cost_scene_threshold_percent"] == 25
+        big_row = next(r for r in d["scenes"] if r["scene_id"] == big["id"])
+        assert big_row["total_credits"] == 51
+        assert big_row["share_pct"] > 25
+        assert big_row["high_cost"] is True
+        for r in d["scenes"]:
+            if r["scene_id"] != big["id"]:
+                assert r["share_pct"] < 25
+                assert r["high_cost"] is False
+
+        # Lower threshold to 10% via query → all scenes flip to high-cost
+        d2 = s.get(
+            f"{API}/projects/{pid}/scene-costs",
+            params={"high_cost_pct": 10},
+        ).json()
+        assert d2["high_cost_scene_threshold_percent"] == 10
+        for r in d2["scenes"]:
+            assert r["high_cost"] is True
+
+        # Raise threshold to 50% via query → only the big scene's share is < 50% so nothing flags
+        d3 = s.get(
+            f"{API}/projects/{pid}/scene-costs",
+            params={"high_cost_pct": 50},
+        ).json()
+        assert d3["high_cost_scene_threshold_percent"] == 50
+        for r in d3["scenes"]:
+            assert r["high_cost"] is False
+    finally:
+        s.delete(f"{API}/projects/{pid}")
+
+
+def test_scene_costs_404_still_works_for_wallet(s):
+    """Fallback path: unknown project → 404 (frontend then shows 'Estimate unavailable')."""
+    r = s.get(f"{API}/projects/totally-not-real/scene-costs")
+    assert r.status_code == 404
