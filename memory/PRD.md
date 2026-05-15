@@ -132,3 +132,15 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 5 · voice 1
 - Frontend Scene editor "Characters in scene" tag list: characters with a voice override show a small yellow "Voice Override" chip next to their name. Hover/title tooltip reveals "Voice: {provider}/{model}" + "Source: Character Override / Project Override / Global Default" pulled from the existing voice-resolution endpoint.
 - Tests: 38/38 backend cases pass. Added: `test_scene_costs_basic_and_multi_segment` (planned=max(1, n_segments); 0-segment scene → 15 credits; 2-segment scene → 27 credits), `test_scene_costs_matches_spec_example` (image=2, video=5, voice=1, n=2 → 13), `test_voice_resolution_remains_after_scene_cost_calls` (mock-mode preserved across endpoints; character override still wins).
 - All generation remains mock; flags `USE_REAL_*_PROVIDER` still false; no API keys collected.
+
+## Iteration 8 (2026-02) — Live cost badge + Scenes header grand total
+- Frontend ProjectStudio now fetches `GET /api/projects/{id}/scene-costs` into a `sceneCosts` state with `{status: idle|loading|ok|error, data}`. Lifted into the parent so all tabs share the same source.
+- New Project header **CostBadge** label is "Project scene cost"; renders one of:
+  - "Calculating…" while loading (data-testid: `cost-badge-loading`)
+  - "Estimate unavailable" on error (data-testid: `cost-badge-error`)
+  - "~{grand_total_credits} credits" when ok (data-testid: `cost-badge-total`)
+- Scenes tab header shows: `N scenes · ~X credits` using the same backend value (data-testid: `scenes-grand-total`).
+- `reloadAll` now refetches project + voice-resolution + scene-costs and is wired into Scenes/Images/VideoSegments tabs so any mutation (add/delete scene, generate/expand/regenerate/delete segment) live-updates the badge and the Scenes header.
+- Backend remains the source of truth — frontend never recomputes the project total locally, only displays/refetches.
+- Tests: 40/40 backend cases passing. Added `test_scene_costs_grand_total_updates_after_expand` (verifies grand_total bumps by exactly `video_segment` cost on expand) and `test_scene_costs_404_for_unknown_project` (so the FE error fallback has a real failure mode).
+- Mock-only invariants preserved.

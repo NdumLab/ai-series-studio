@@ -75,6 +75,7 @@ export default function ProjectStudio() {
   const [data, setData] = useState(null);
   const [providers, setProviders] = useState(null);
   const [voiceRes, setVoiceRes] = useState(null);
+  const [sceneCosts, setSceneCosts] = useState({ status: "idle", data: null });
   const [options, setOptions] = useState({ voices: [], music_moods: [], costs: {} });
   const [tab, setTab] = useState("story");
 
@@ -87,17 +88,26 @@ export default function ProjectStudio() {
     () => ProjectProviders.voiceResolution(id).then(setVoiceRes),
     [id]
   );
+  const loadSceneCosts = useCallback(() => {
+    setSceneCosts((p) => ({ ...p, status: "loading" }));
+    return Projects.sceneCosts(id)
+      .then((d) => setSceneCosts({ status: "ok", data: d }))
+      .catch(() => setSceneCosts({ status: "error", data: null }));
+  }, [id]);
+
   const reloadAll = useCallback(() => {
     load();
     loadVoiceRes();
-  }, [load, loadVoiceRes]);
+    loadSceneCosts();
+  }, [load, loadVoiceRes, loadSceneCosts]);
 
   useEffect(() => {
     load();
     loadProviders();
     loadVoiceRes();
+    loadSceneCosts();
     Meta.options().then(setOptions);
-  }, [load, loadProviders, loadVoiceRes]);
+  }, [load, loadProviders, loadVoiceRes, loadSceneCosts]);
 
   if (!data) return <div className="text-[#A1A1AA] text-sm">Loading project…</div>;
   const { project, scenes, characters } = data;
@@ -134,7 +144,7 @@ export default function ProjectStudio() {
           >
             <SettingsIcon className="w-4 h-4 mr-1.5" /> Providers
           </Button>
-          <CostBadge projectId={id} />
+          <CostBadge sceneCosts={sceneCosts} />
         </div>
       </div>
 
@@ -174,6 +184,7 @@ export default function ProjectStudio() {
             characters={characters}
             options={options}
             voiceResolution={voiceRes}
+            sceneCosts={sceneCosts}
             reload={reloadAll}
           />
         </TabsContent>
@@ -191,7 +202,7 @@ export default function ProjectStudio() {
             scenes={scenes}
             providers={providers}
             options={options}
-            reload={load}
+            reload={reloadAll}
           />
         </TabsContent>
         <TabsContent value="segments" className="mt-6">
@@ -199,7 +210,7 @@ export default function ProjectStudio() {
             scenes={scenes}
             providers={providers}
             options={options}
-            reload={load}
+            reload={reloadAll}
           />
         </TabsContent>
         <TabsContent value="voice-music" className="mt-6">
@@ -274,22 +285,36 @@ function StageProgress({ current, onJump }) {
 }
 
 // ---------------------------------------------------------------------------
-// Cost badge
+// Cost badge (live, backed by /scene-costs)
 // ---------------------------------------------------------------------------
-function CostBadge({ projectId }) {
-  const [est, setEst] = useState(null);
-  useEffect(() => {
-    Projects.costEstimate(projectId).then(setEst);
-  }, [projectId]);
-  if (!est) return null;
+function CostBadge({ sceneCosts }) {
+  let body;
+  if (sceneCosts.status === "loading" && !sceneCosts.data) {
+    body = (
+      <div className="font-display text-lg font-bold text-[#A1A1AA]" data-testid="cost-badge-loading">
+        Calculating…
+      </div>
+    );
+  } else if (sceneCosts.status === "error") {
+    body = (
+      <div className="font-display text-sm font-semibold text-[#A1A1AA]" data-testid="cost-badge-error">
+        Estimate unavailable
+      </div>
+    );
+  } else {
+    const total = sceneCosts.data?.grand_total_credits ?? 0;
+    body = (
+      <div className="font-display text-lg font-bold" data-testid="cost-badge-total">
+        ~{total} <span className="text-xs text-[#A1A1AA] font-mono">credits</span>
+      </div>
+    );
+  }
   return (
     <div className="es-card px-4 py-3 inline-flex items-center gap-3" data-testid="cost-estimate">
       <Coins className="w-4 h-4 text-[#FFCC00]" />
       <div>
-        <div className="es-label">Estimated to finish</div>
-        <div className="font-display text-lg font-bold">
-          {est.total_credits} <span className="text-xs text-[#A1A1AA] font-mono">credits</span>
-        </div>
+        <div className="es-label">Project scene cost</div>
+        {body}
       </div>
     </div>
   );
@@ -425,7 +450,7 @@ function StoryTab({ project, providers, options, reload, onContinue }) {
 // ---------------------------------------------------------------------------
 // Scenes tab — text/structure editing only (no media generation here)
 // ---------------------------------------------------------------------------
-function ScenesTab({ project, scenes, characters, options, voiceResolution, reload }) {
+function ScenesTab({ project, scenes, characters, options, voiceResolution, sceneCosts, reload }) {
   if (!scenes.length) {
     return (
       <div className="es-card p-12 text-center">
@@ -436,8 +461,31 @@ function ScenesTab({ project, scenes, characters, options, voiceResolution, relo
       </div>
     );
   }
+  let totalText = null;
+  if (sceneCosts?.status === "loading" && !sceneCosts.data) totalText = "calculating…";
+  else if (sceneCosts?.status === "error") totalText = "estimate unavailable";
+  else if (sceneCosts?.data) totalText = `~${sceneCosts.data.grand_total_credits} credits`;
   return (
     <div className="space-y-4" data-testid="scenes-list">
+      <div className="flex items-end justify-between flex-wrap gap-3" data-testid="scenes-tab-header">
+        <div>
+          <p className="es-label mb-1">Scenes</p>
+          <h3 className="font-display text-2xl font-bold">
+            {scenes.length} {scenes.length === 1 ? "scene" : "scenes"}
+            {totalText ? (
+              <span
+                className="ml-3 text-sm font-mono text-[#FFCC00] font-normal"
+                data-testid="scenes-grand-total"
+              >
+                · {totalText}
+              </span>
+            ) : null}
+          </h3>
+          <p className="text-xs text-[#A1A1AA] mt-1">
+            Estimated project scene cost · live mock estimate
+          </p>
+        </div>
+      </div>
       <InfoCallout
         text="Edit titles, locations, prompts and dialogue here. Image and video generation happen in their own tabs."
       />

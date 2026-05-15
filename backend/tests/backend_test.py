@@ -730,3 +730,36 @@ def test_voice_resolution_remains_after_scene_cost_calls(s):
         assert char["voice"]["provider"] == "openai-tts"
     finally:
         s.delete(f"{API}/projects/{pid}")
+
+
+# ---------- Cost badge live updates ----------
+def test_scene_costs_grand_total_updates_after_expand(s):
+    """Expanding a scene must bump grand_total_credits by exactly video_segment cost."""
+    p = s.post(f"{API}/projects", json={"title": "TEST_LiveCost", "idea": "x"}).json()
+    pid = p["id"]
+    try:
+        sc = s.post(
+            f"{API}/projects/{pid}/scenes",
+            json={"title": "TEST_Live", "duration": 10},
+        ).json()
+        d0 = s.get(f"{API}/projects/{pid}/scene-costs").json()
+        before = d0["grand_total_credits"]
+        # planned=1 → 2 + 12 + 1 = 15
+        assert before == 15
+        # First segment: count goes from 0 → 1, planned stays 1, total stays 15
+        _retry(lambda: s.post(f"{API}/scenes/{sc['id']}/segments")).json()
+        d1 = s.get(f"{API}/projects/{pid}/scene-costs").json()
+        assert d1["grand_total_credits"] == before  # planned unchanged
+        # Expand once → segments=2, planned=2, total = 2 + 24 + 1 = 27 (delta = 12)
+        _retry(lambda: s.post(f"{API}/scenes/{sc['id']}/expand")).json()
+        d2 = s.get(f"{API}/projects/{pid}/scene-costs").json()
+        assert d2["grand_total_credits"] == before + 12
+        assert d2["scenes"][0]["planned_segments"] == 2
+        assert d2["mock_mode"] is True
+    finally:
+        s.delete(f"{API}/projects/{pid}")
+
+
+def test_scene_costs_404_for_unknown_project(s):
+    r = s.get(f"{API}/projects/does-not-exist/scene-costs")
+    assert r.status_code == 404

@@ -15,6 +15,7 @@ export const Projects = {
   splitScenes: (id) => api.post(`/projects/${id}/split-scenes`).then((r) => r.data),
   export: (id) => api.get(`/projects/${id}/export`).then((r) => r.data),
   costEstimate: (id) => api.get(`/projects/${id}/cost-estimate`).then((r) => r.data),
+  sceneCosts: (id) => api.get(`/projects/${id}/scene-costs`).then((r) => r.data),
 };
 
 export const Characters = {
