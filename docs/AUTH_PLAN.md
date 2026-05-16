@@ -8,9 +8,9 @@ usage. Billing, credits, provider usage, and generated assets all need a stable
 owner.
 
 The repo already has local MVP auth scaffolding: email/password beta accounts,
-bearer sessions, per-user project scoping, and `AUTH_DEMO_MODE=true` for local
-demo compatibility. This plan defines the production-ready path before paid MVP
-work.
+JWT bearer access tokens, per-user project scoping, and `AUTH_ENABLED=false`
+with `AUTH_DEMO_MODE=true` for local demo compatibility. This plan defines the
+production-ready path before paid MVP work.
 
 ## Why Auth Comes Before Real Stripe Or Paid Providers
 
@@ -182,7 +182,8 @@ platform provides it cleanly.
 
 Recommended MVP path:
 
-1. Keep `AUTH_DEMO_MODE=true` for local development only.
+1. Keep `AUTH_ENABLED=false` and `AUTH_DEMO_MODE=true` for local development
+   only.
 2. Require authenticated users in staging/private beta with
    `AUTH_DEMO_MODE=false`.
 3. If platform Google login is available, use it for private beta identity and

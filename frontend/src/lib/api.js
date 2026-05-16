@@ -28,6 +28,7 @@ export const session = {
 };
 
 export const Auth = {
+  config: () => api.get("/auth/config").then((r) => r.data),
   register: (payload) => api.post("/auth/register", payload).then((r) => r.data),
   login: (payload) => api.post("/auth/login", payload).then((r) => r.data),
   logout: () => api.post("/auth/logout").then((r) => r.data),

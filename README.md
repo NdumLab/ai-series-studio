@@ -21,9 +21,10 @@ cost controls, testing strategy, launch criteria, and post-MVP scope.
 
 - Story, scene, character, image, video segment, voice/music, provider, and
   export workflows are implemented for the mock-first studio.
-- MVP auth is implemented with local email/password beta accounts, bearer
-  sessions, and per-user project ownership. Requests without a token still use
-  `user-demo` when `AUTH_DEMO_MODE=true` for local demo compatibility.
+- MVP auth is implemented with local email/password beta accounts, JWT bearer
+  access tokens, and per-user project ownership. Requests without a token still
+  use `user-demo` when `AUTH_ENABLED=false` and `AUTH_DEMO_MODE=true` for local
+  demo compatibility.
 - Per-user credit balances are enforced for generation actions. The backend
   reserves credits before story rewrite, story improvement, scene split, image
   generation, and video segment generation, blocks insufficient-credit requests,
@@ -75,9 +76,9 @@ updates `order` based on list position, and returns the reordered records.
 
 ## Auth And Ownership
 
-Local/demo mode is enabled by default. With no `Authorization` header, the API
-uses the seeded `user-demo` account so existing local tests and demos keep
-working. Real beta accounts can register or sign in:
+Local/demo mode is enabled by default. With `AUTH_ENABLED=false` and no
+`Authorization` header, the API uses the seeded `user-demo` account so existing
+local tests and demos keep working. Real beta accounts can register or sign in:
 
 ```http
 POST /api/auth/register
@@ -92,7 +93,9 @@ project views are scoped to the current user. To require auth for every request
 in a non-demo environment, set:
 
 ```bash
+AUTH_ENABLED=true
 AUTH_DEMO_MODE=false
+AUTH_JWT_SECRET=replace-with-a-long-random-secret
 ```
 
 ## Billing Status

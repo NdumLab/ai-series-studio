@@ -78,6 +78,96 @@ def test_me(s):
     assert r.json()["id"] == "user-demo"
 
 
+def _register_user(s, label):
+    email = f"test-{label}-{int(time.time() * 1000)}@example.com"
+    r = s.post(
+        f"{API}/auth/register",
+        json={
+            "name": f"Test {label}",
+            "email": email,
+            "password": "correct-horse-battery",
+        },
+    )
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["token"]
+    assert d["token_type"] == "bearer"
+    assert d["user"]["email"] == email
+    assert "password_hash" not in d["user"]
+    return email, d["token"], d["user"]
+
+
+def test_auth_signup_login_current_user_and_invalid_login(s):
+    cfg = s.get(f"{API}/auth/config")
+    assert cfg.status_code == 200
+    assert cfg.json()["auth_enabled"] is False
+
+    email, token, user = _register_user(s, "auth")
+    authed = requests.Session()
+    authed.headers.update({
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}",
+    })
+
+    me_r = authed.get(f"{API}/me")
+    assert me_r.status_code == 200
+    assert me_r.json()["id"] == user["id"]
+
+    login_r = s.post(
+        f"{API}/auth/login",
+        json={"email": email, "password": "correct-horse-battery"},
+    )
+    assert login_r.status_code == 200
+    assert login_r.json()["token"]
+
+    bad_r = s.post(
+        f"{API}/auth/login",
+        json={"email": email, "password": "wrong-password"},
+    )
+    assert bad_r.status_code == 401
+
+
+def test_authenticated_project_ownership_is_enforced(s):
+    _, token_a, user_a = _register_user(s, "owner-a")
+    _, token_b, _ = _register_user(s, "owner-b")
+    a = requests.Session()
+    a.headers.update({"Content-Type": "application/json", "Authorization": f"Bearer {token_a}"})
+    b = requests.Session()
+    b.headers.update({"Content-Type": "application/json", "Authorization": f"Bearer {token_b}"})
+
+    create_r = a.post(f"{API}/projects", json={"title": "TEST_Owned", "idea": "owned"})
+    assert create_r.status_code == 200, create_r.text
+    pid = create_r.json()["id"]
+    assert create_r.json()["user_id"] == user_a["id"]
+
+    list_a = a.get(f"{API}/projects")
+    assert pid in [p["id"] for p in list_a.json()]
+    list_b = b.get(f"{API}/projects")
+    assert pid not in [p["id"] for p in list_b.json()]
+
+    assert b.get(f"{API}/projects/{pid}").status_code == 404
+    assert b.put(f"{API}/projects/{pid}", json={"title": "stolen"}).status_code == 404
+    assert b.delete(f"{API}/projects/{pid}").json()["exists"] is False
+
+    # Owner can still access and clean up their project.
+    assert a.get(f"{API}/projects/{pid}").status_code == 200
+    a.delete(f"{API}/projects/{pid}")
+
+
+def test_demo_mode_still_works_when_auth_disabled(s):
+    r = s.post(f"{API}/projects", json={"title": "TEST_Demo_Mode", "idea": "demo"})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["user_id"] == "user-demo"
+    s.delete(f"{API}/projects/{d['id']}")
+
+
+def test_admin_endpoints_demo_safe(s):
+    r = s.get(f"{API}/admin/stats")
+    assert r.status_code == 200
+    assert "users" in r.json()
+
+
 # ---------- Projects ----------
 def test_list_projects_contains_created(s, project_id):
     r = s.get(f"{API}/projects")

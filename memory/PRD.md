@@ -6,15 +6,15 @@ Build a full-stack web MVP called AI Episode Studio that helps creators generate
 ## Architecture
 - Backend: FastAPI + MongoDB (relational-style schemas), all routes under `/api`
 - Frontend: React (CRA + craco) + Tailwind + shadcn/ui, dark cinematic theme (Outfit + IBM Plex Sans), red accent #FF3B30
-- MVP auth is implemented: email/password beta accounts, bearer sessions, and
-  per-user project ownership. `AUTH_DEMO_MODE=true` preserves the seeded
-  no-token `user-demo` workflow for local demos/tests.
+- MVP auth is implemented: email/password beta accounts, JWT bearer access
+  tokens, and per-user project ownership. `AUTH_ENABLED=false` plus
+  `AUTH_DEMO_MODE=true` preserves the seeded no-token `user-demo` workflow for
+  local demos/tests.
 - Provider architecture exists under `backend/providers/`; LLM is real-capable behind `USE_REAL_LLM_PROVIDER`, while image/video/voice/music/export remain mock-only by construction.
 - Mock generators return curated static URLs (Unsplash + Google sample mp4s) and log every generation/provider activity.
 
 ## Data Models (MongoDB collections)
 - users: id, name, email, role, credits, optional password hash/salt, created_at
-- user_sessions: id, token, user_id, created_at
 - projects: id, user_id, title, idea, rewritten_story, status, provider override fields, optional soft-delete fields (`deleted_at`, `deleted_by`, `delete_expires_at`, `previous_status`), quality_scores, created_at, updated_at
 - characters: id, project_id, order, name, description, voice_style, voice_provider, voice_model, reference_image_url
 - scenes: id, project_id, order, title, duration, location, characters[], visual_prompt, raw/enhanced prompts, dialogue, music_mood, camera_direction, tension fields, voice, image_url, status
@@ -111,12 +111,13 @@ because billing and credit fulfillment need a reliable user owner.
   - POST /api/auth/login
   - POST /api/auth/logout
   - GET /api/me returns the current public user.
-- Added bearer session tokens stored server-side in `user_sessions`.
+- Added JWT bearer access tokens for authenticated API requests.
 - Project list/create/detail/update/delete/restore plus project-scoped
   character, scene, segment, provider, export, and generation routes are scoped
   to the authenticated user.
-- Preserved local demo compatibility: when `AUTH_DEMO_MODE=true` and no bearer
-  token is sent, requests use the seeded `user-demo` account.
+- Preserved local demo compatibility: when `AUTH_ENABLED=false`,
+  `AUTH_DEMO_MODE=true`, and no bearer token is sent, requests use the seeded
+  `user-demo` account.
 - Frontend now has a private beta login/register page and stores the bearer
   token in local storage for API requests.
 - No Stripe, paid provider calls, API key inputs, or real image/video/voice/

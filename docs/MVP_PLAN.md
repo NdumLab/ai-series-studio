@@ -22,9 +22,9 @@ Completed today:
   enhancement, image/video prompt surfaces, and scene reorder.
 - Character workflow: Cast view, character CRUD, per-character voice override,
   character `order`, and character drag handles/reorder.
-- Auth and ownership: local email/password beta accounts, bearer sessions,
-  per-user project scoping, and `AUTH_DEMO_MODE=true` compatibility for
-  no-token local demos.
+- Auth and ownership: local email/password beta accounts, JWT bearer access
+  tokens, per-user project scoping, and `AUTH_ENABLED=false` /
+  `AUTH_DEMO_MODE=true` compatibility for no-token local demos.
 - Reorder workflows: scenes, segments, and characters all support persisted
   ordering with optimistic frontend updates.
 - Creative Quality Engine: story scores, scene tension fields, improvement

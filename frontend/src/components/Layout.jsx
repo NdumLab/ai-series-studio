@@ -12,12 +12,31 @@ export default function Layout() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
+  const [authEnabled, setAuthEnabled] = useState(false);
 
   useEffect(() => {
-    Meta.me()
-      .then(setUser)
-      .catch(() => setUser(null));
-  }, [pathname]);
+    let cancelled = false;
+    Promise.all([Auth.config().catch(() => ({ auth_enabled: false })), Meta.me()])
+      .then(([cfg, me]) => {
+        if (cancelled) return;
+        setAuthEnabled(!!cfg.auth_enabled);
+        setUser(me);
+        if (cfg.auth_enabled && pathname === "/login") {
+          navigate("/");
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        const enabled = err?.response?.status === 401 || authEnabled;
+        setUser(null);
+        if (enabled && pathname !== "/login") {
+          navigate("/login");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname, navigate, authEnabled]);
 
   const logout = async () => {
     try {

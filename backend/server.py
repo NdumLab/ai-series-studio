@@ -7,7 +7,6 @@ import os
 import asyncio
 import logging
 import random
-import secrets
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
@@ -58,6 +57,8 @@ from creative_quality import (  # noqa: E402
 )
 from auth_utils import (  # noqa: E402
     bearer_token,
+    create_access_token,
+    decode_access_token,
     hash_password,
     normalize_email,
     public_user,
@@ -99,9 +100,15 @@ DEFAULT_USER = {
     "created_at": datetime.now(timezone.utc).isoformat(),
 }
 
-# Local development remains demo-friendly: requests without a bearer token use
-# the seeded demo user. Authenticated beta users receive isolated projects.
+# Local development remains demo-friendly by default. Set AUTH_ENABLED=true in
+# staging/beta to require JWT auth for user-owned resources.
+AUTH_ENABLED = os.environ.get("AUTH_ENABLED", "false").strip().lower() == "true"
 AUTH_DEMO_MODE = os.environ.get("AUTH_DEMO_MODE", "true").strip().lower() != "false"
+AUTH_JWT_SECRET = os.environ.get("AUTH_JWT_SECRET", "local-dev-auth-secret-change-me")
+try:
+    AUTH_TOKEN_EXPIRES_MINUTES = int(os.environ.get("AUTH_TOKEN_EXPIRES_MINUTES", "1440"))
+except (TypeError, ValueError):
+    AUTH_TOKEN_EXPIRES_MINUTES = 1440
 
 MOCK_SCENE_IMAGES = [
     "https://static.prod-images.emergentagent.com/jobs/79e2f754-43ce-44a2-9d11-60523bb0d255/images/623d1bffe45150b2f2ede70157aed5fe723bbd8f51fa49c37a6ca79970a2b82c.png",
@@ -363,32 +370,38 @@ async def ensure_default_user() -> None:
         await db.users.insert_one(DEFAULT_USER.copy())
 
 
-async def _create_session(user_id: str) -> dict:
-    token = secrets.token_urlsafe(32)
-    doc = {
-        "id": new_id(),
-        "token": token,
-        "user_id": user_id,
-        "created_at": now_iso(),
-    }
-    await db.user_sessions.insert_one(doc.copy())
-    return doc
+def _create_access_token(user_id: str) -> str:
+    return create_access_token(
+        user_id=user_id,
+        secret=AUTH_JWT_SECRET,
+        expires_in_seconds=AUTH_TOKEN_EXPIRES_MINUTES * 60,
+    )
 
 
 async def current_user(authorization: Optional[str] = Header(None)) -> dict:
     await ensure_default_user()
     token = bearer_token(authorization)
     if token:
-        sess = await db.user_sessions.find_one({"token": token}, {"_id": 0})
-        if not sess:
+        try:
+            payload = decode_access_token(token, AUTH_JWT_SECRET)
+        except ValueError:
             raise HTTPException(401, "Invalid or expired session")
-        user = await db.users.find_one({"id": sess["user_id"]}, {"_id": 0})
+        user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
         if not user:
             raise HTTPException(401, "Session user not found")
         return user
-    if AUTH_DEMO_MODE:
+    if not AUTH_ENABLED and AUTH_DEMO_MODE:
         return await db.users.find_one({"id": DEFAULT_USER_ID}, {"_id": 0})
     raise HTTPException(401, "Authentication required")
+
+
+async def current_admin_user(authorization: Optional[str] = Header(None)) -> dict:
+    user = await current_user(authorization)
+    if not AUTH_ENABLED:
+        return user
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Admin access required")
+    return user
 
 
 def _project_owner_filter(project_id: str, user: dict, include_deleted: bool = False) -> dict:
@@ -653,8 +666,11 @@ async def auth_register(body: AuthRegister):
         "created_at": now_iso(),
     }
     await db.users.insert_one(user.copy())
-    session = await _create_session(user["id"])
-    return {"token": session["token"], "user": public_user(user)}
+    return {
+        "token": _create_access_token(user["id"]),
+        "token_type": "bearer",
+        "user": public_user(user),
+    }
 
 
 @api.post("/auth/login")
@@ -665,15 +681,17 @@ async def auth_login(body: AuthLogin):
         raise HTTPException(401, "Invalid email or password")
     if not verify_password(body.password or "", user["password_salt"], user["password_hash"]):
         raise HTTPException(401, "Invalid email or password")
-    session = await _create_session(user["id"])
-    return {"token": session["token"], "user": public_user(user)}
+    return {
+        "token": _create_access_token(user["id"]),
+        "token_type": "bearer",
+        "user": public_user(user),
+    }
 
 
 @api.post("/auth/logout")
 async def auth_logout(authorization: Optional[str] = Header(None)):
-    token = bearer_token(authorization)
-    if token:
-        await db.user_sessions.delete_one({"token": token})
+    # JWT access tokens are stateless in this MVP. The frontend clears local
+    # storage; production hardening should add refresh-token/session revocation.
     return {"ok": True}
 
 
@@ -737,7 +755,20 @@ async def providers_status_endpoint(
 @api.get("/config")
 async def get_studio_config():
     """Tunable thresholds (wallet credits, high-cost-scene threshold)."""
-    return {**studio_config(), "mock_mode": True}
+    return {
+        **studio_config(),
+        "mock_mode": True,
+        "auth_enabled": AUTH_ENABLED,
+        "auth_demo_mode": AUTH_DEMO_MODE,
+    }
+
+
+@api.get("/auth/config")
+async def auth_config():
+    return {
+        "auth_enabled": AUTH_ENABLED,
+        "auth_demo_mode": AUTH_DEMO_MODE,
+    }
 
 
 @api.get("/billing/status")
@@ -1928,7 +1959,7 @@ async def export_project(project_id: str, user: dict = Depends(current_user)):
 # Admin
 # ---------------------------------------------------------------------------
 @api.get("/admin/stats")
-async def admin_stats():
+async def admin_stats(_: dict = Depends(current_admin_user)):
     users = await db.users.count_documents({})
     projects = await db.projects.count_documents({})
     gens = await db.generations.count_documents({})
@@ -1952,22 +1983,22 @@ async def admin_stats():
 
 
 @api.get("/admin/users")
-async def admin_users():
+async def admin_users(_: dict = Depends(current_admin_user)):
     return await db.users.find({}, {"_id": 0}).to_list(500)
 
 
 @api.get("/admin/projects")
-async def admin_projects():
+async def admin_projects(_: dict = Depends(current_admin_user)):
     return await db.projects.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
 
 
 @api.get("/admin/generations")
-async def admin_generations():
+async def admin_generations(_: dict = Depends(current_admin_user)):
     return await db.generations.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
 
 
 @api.get("/admin/failed-jobs")
-async def admin_failed_jobs():
+async def admin_failed_jobs(_: dict = Depends(current_admin_user)):
     return await db.generations.find({"status": "failed"}, {"_id": 0}).sort("created_at", -1).to_list(200)
 
 
@@ -2001,14 +2032,14 @@ async def _purge_expired_projects_now() -> dict:
 
 
 @api.post("/admin/purge-deleted-projects")
-async def admin_purge_deleted_projects():
+async def admin_purge_deleted_projects(_: dict = Depends(current_admin_user)):
     """Permanently remove soft-deleted projects whose delete_expires_at has passed."""
     purged = await _purge_expired_projects_now()
     return {"ok": True, "purged": purged}
 
 
 @api.get("/admin/deleted-projects")
-async def admin_deleted_projects():
+async def admin_deleted_projects(_: dict = Depends(current_admin_user)):
     """Soft-deleted projects still inside the restore window (delete_expires_at > now).
 
     Returns child counts per project so the admin panel can show them at-a-glance.
@@ -2038,7 +2069,7 @@ async def admin_deleted_projects():
 
 
 @api.get("/admin/provider-activity")
-async def admin_provider_activity(limit: int = 50):
+async def admin_provider_activity(limit: int = 50, _: dict = Depends(current_admin_user)):
     """Latest provider execution records (safe metadata only, no secrets)."""
     capped = max(1, min(int(limit or 50), 200))
     rows = await db.provider_activity.find({}, {"_id": 0}).sort("created_at", -1).to_list(capped)
@@ -2046,7 +2077,7 @@ async def admin_provider_activity(limit: int = 50):
 
 
 @api.get("/admin/provider-health")
-async def admin_provider_health(window_minutes: int = 60):
+async def admin_provider_health(window_minutes: int = 60, _: dict = Depends(current_admin_user)):
     """Aggregated mock-mode health pulse for each modality over the last window.
 
     Status rules:
@@ -2115,6 +2146,7 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     await ensure_default_user()
+    await _backfill_demo_user_ownership()
     await _backfill_creative_quality()
     # Background purge of expired soft-deleted projects.
     await _start_purge_scheduler()
@@ -2156,6 +2188,20 @@ async def _start_purge_scheduler() -> None:
                 log.warning("Scheduled purge failed: %s", exc)
 
     _purge_task = asyncio.create_task(_loop())
+
+
+async def _backfill_demo_user_ownership():
+    """Assign legacy projects without user_id to the seeded demo user."""
+    res = await db.projects.update_many(
+        {"$or": [{"user_id": {"$exists": False}}, {"user_id": None}, {"user_id": ""}]},
+        {"$set": {"user_id": DEFAULT_USER_ID}},
+    )
+    if res.modified_count:
+        log.info(
+            "Backfilled project ownership to %s: projects=%s",
+            DEFAULT_USER_ID,
+            res.modified_count,
+        )
 
 
 async def _backfill_creative_quality():
