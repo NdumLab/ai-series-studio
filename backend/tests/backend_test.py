@@ -1962,6 +1962,12 @@ def test_provider_status_endpoint_global(s):
     assert body["mode"] == "mock"
     assert body["would_use_real_provider"] is False
     assert body["feature_flag_enabled"] is False
+    assert body["selected_provider"]
+    assert body["selected_model"] is not None
+    assert body["secrets_backend"] in {"disabled", "ssm"}
+    assert body["key_present"] is False
+    assert body["key_status"] == "not_configured"
+    assert "secret_value" not in json.dumps(body).lower()
 
 
 def test_provider_status_endpoint_rejects_unknown_modality(s):

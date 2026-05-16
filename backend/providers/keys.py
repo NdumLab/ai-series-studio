@@ -2,11 +2,13 @@
 
 Phase 2B (LLM-only): the `llm` modality is considered key-configured when
 the Emergent universal LLM key is set AND `emergentintegrations` is
-importable. Every other modality remains permanently `not_configured` until
-a proper secrets store exists.
+importable. Non-LLM modalities use the backend-only secrets resolver, which
+fails closed unless a production secrets backend is configured.
 """
 from __future__ import annotations
 from typing import Optional
+
+from secrets_resolver import get_provider_secret, key_present_for_provider, secrets_backend
 
 
 # Map of which modality each provider id belongs to. Used by `key_present()`
@@ -21,11 +23,12 @@ _LLM_PROVIDER_IDS = {
 def key_present_for_modality(modality: Optional[str], provider_name: Optional[str]) -> bool:
     """Return True only when a key/runtime is configured for this modality.
 
-    Phase 2B accepts ONLY the `llm` modality. All other modalities return
-    False unconditionally until a proper secrets store exists.
+    LLM behavior remains unchanged. Other modalities are only considered
+    key-configured when the backend secrets resolver can prove a server-side
+    secret exists.
     """
     if modality != "llm":
-        return False
+        return key_present_for_provider(modality, provider_name)
     # Lazy import to avoid pulling emergentintegrations at module load.
     try:
         from .llm_real import real_llm_available
@@ -49,3 +52,19 @@ def key_present(provider_name: Optional[str]) -> bool:
 
 def key_status(provider_name: Optional[str]) -> str:
     return "configured" if key_present(provider_name) else "not_configured"
+
+
+def key_status_for_modality(modality: Optional[str], provider_name: Optional[str]) -> str:
+    if modality == "llm":
+        return key_status(provider_name)
+    return get_provider_secret(modality, provider_name).status
+
+
+def secret_ref_for_modality(modality: Optional[str], provider_name: Optional[str]) -> Optional[str]:
+    if modality == "llm":
+        return None
+    return get_provider_secret(modality, provider_name).secret_ref
+
+
+def provider_secrets_backend() -> str:
+    return secrets_backend()

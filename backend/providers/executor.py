@@ -25,7 +25,13 @@ from .base import (
     STATUS_BLOCKED,
     STATUS_SKIPPED,
 )
-from .keys import key_present_for_modality, key_status
+from .keys import (
+    key_present_for_modality,
+    key_status,
+    key_status_for_modality,
+    provider_secrets_backend,
+    secret_ref_for_modality,
+)
 from .mocks import MOCK_PROVIDER_BY_MODALITY
 from .resolver import resolve_provider, resolve_voice_for_character
 
@@ -100,17 +106,26 @@ def provider_status(
     # pinned to mock-only in Phase 2B.
     has_key = key_present_for_modality(modality, resolved["provider"])
     will_run_real = flag_on and has_key
+    # Secrets can now be resolved for future non-LLM providers, but no real
+    # non-LLM provider class is connected yet. Keep runtime capability false
+    # until a provider implementation exists.
+    real_capable = modality == "llm"
     return {
         "modality": modality,
         "provider": resolved["provider"],
+        "selected_provider": resolved["provider"],
         "model": resolved["model"],
+        "selected_model": resolved["model"],
         "source": resolved["source"],
         "feature_flag_enabled": flag_on,
-        "key_status": key_status(resolved["provider"]) if modality == "llm" else "not_configured",
+        "secrets_backend": provider_secrets_backend() if modality != "llm" else "llm-runtime",
+        "secret_ref": secret_ref_for_modality(modality, resolved["provider"]),
+        "key_status": key_status_for_modality(modality, resolved["provider"]),
         "key_present": has_key,
         "would_use_real_provider": will_run_real,
-        "real_capable": modality == "llm",
+        "real_capable": real_capable,
         "mode": "real" if will_run_real else "mock",
+        "status": "ready" if will_run_real else ("blocked" if flag_on else "mock"),
     }
 
 
@@ -149,7 +164,8 @@ async def execute_provider(
         "resolved_source": resolved["source"],
         "feature_flag_enabled": flag_on,
         "key_present": has_key,
-        "key_status": key_status(resolved["provider"]) if modality == "llm" else "not_configured",
+        "key_status": key_status_for_modality(modality, resolved["provider"]),
+        "secrets_backend": provider_secrets_backend() if modality != "llm" else "llm-runtime",
     }
 
     mock_cls = MOCK_PROVIDER_BY_MODALITY[modality]

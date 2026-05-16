@@ -48,6 +48,9 @@ provider is connected yet.
 - Real image generation remains blocked until `USE_REAL_IMAGE_PROVIDER=true`,
   a server-side secret is available, credit/cost checks pass, and generated
   image storage is ready.
+- A backend-only secrets resolver foundation exists. It defaults to disabled
+  mode and can later resolve provider API keys from AWS SSM Parameter Store
+  `SecureString` without exposing secret values to MongoDB or the frontend.
 
 ## Reorder Endpoints
 
@@ -109,6 +112,9 @@ JWT_SECRET_KEY=replace-with-a-long-random-secret
 JWT_ALGORITHM=HS256
 JWT_EXPIRE_MINUTES=1440
 PASSWORD_MIN_LENGTH=8
+SECRETS_BACKEND=disabled
+AWS_REGION=us-east-1
+SSM_PROVIDER_KEY_PREFIX=/ai-series-studio/providers
 ```
 
 `AUTH_JWT_SECRET` and `AUTH_TOKEN_EXPIRES_MINUTES` are accepted only as

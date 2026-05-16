@@ -37,6 +37,10 @@ Completed today:
   controls, API design, storage gate, rollout plan, and tests are documented
   in [`docs/IMAGE_PROVIDER_PLAN.md`](IMAGE_PROVIDER_PLAN.md). No real image
   provider code is connected yet.
+- Secrets foundation: backend-only secrets resolver exists with disabled mode
+  and AWS SSM SecureString lookup support. Non-LLM providers remain blocked
+  unless a server-side secret is configured and a future real provider is
+  explicitly connected.
 - Real LLM gating: real LLM support exists for story/text operations behind
   `USE_REAL_LLM_PROVIDER`, with mock fallback.
 - Mock non-LLM providers: Image, Video, Voice, Music, and Export remain
@@ -95,6 +99,7 @@ Completed:
 - [x] Stripe test-mode readiness gate.
 - [x] Stripe test-mode checkout and webhook credit fulfillment.
 - [x] Real image provider integration plan and secrets gate.
+- [x] Server-side secrets resolver foundation.
 
 Remaining:
 
@@ -162,8 +167,10 @@ fulfillment need reliable user ownership.
 
 - Completed: real image provider plan and secrets gate.
 - Recommended first provider: OpenAI `gpt-image-1`.
-- Next implementation gate: add server-side secrets resolver with AWS SSM
-  Parameter Store SecureString support.
+- Completed: add server-side secrets resolver with AWS SSM Parameter Store
+  SecureString support.
+- Next implementation gate: add image storage abstraction before enabling
+  durable real image output.
 - Then add one real image provider behind `USE_REAL_IMAGE_PROVIDER=true`,
   server-side key presence, user credit checks, provider activity logging, and
   storage controls.

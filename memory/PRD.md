@@ -38,6 +38,8 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 - Provider settings + per-project provider overrides; real LLM is gated and available for text operations, non-LLM modalities remain mock-only.
 - Real image provider planning and secrets gate are documented in
   `docs/IMAGE_PROVIDER_PLAN.md`; no real image provider is connected yet.
+- Backend-only provider secrets resolver exists with disabled mode and AWS SSM
+  SecureString lookup support; non-LLM providers remain blocked by default.
 - Scene reorder, segment reorder, and character reorder are implemented.
 - MVP auth and project ownership are implemented with local demo compatibility.
 - Per-user credit balances, `GET /api/credits/status`, credit event logging,
@@ -202,6 +204,21 @@ because billing and credit fulfillment need a reliable user owner.
   storage gate, rollout plan, and tests needed.
 - No real image provider code, real image API calls, API key inputs, real media
   providers, or secrets were added.
+
+## Iteration 31 (2026-05) — Server-side secrets resolver foundation
+- Added `backend/secrets_resolver.py`.
+- Default `SECRETS_BACKEND=disabled` returns safe `not_configured`.
+- `SECRETS_BACKEND=ssm` attempts AWS SSM Parameter Store SecureString lookup
+  using the naming convention `/ai-series-studio/providers/{modality}/{provider}/api-key`.
+- Missing boto3/AWS config/SSM parameters fail closed without exposing raw
+  secret errors to users.
+- Provider key checks now route non-LLM modalities through the resolver while
+  preserving existing real LLM behavior.
+- Provider status includes `secrets_backend`, selected provider/model, key
+  status, key-present state, real capability, and blocked/mock status without
+  returning secret values.
+- No frontend API key inputs, real image provider code, real media calls,
+  Stripe changes, or real LLM changes were added.
 
 ## Iteration 2 (2026-02) — Workflow & Segment Model
 - Added persistent "Mock Mode: No real AI APIs connected yet" badge in top nav.

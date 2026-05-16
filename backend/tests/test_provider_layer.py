@@ -113,6 +113,7 @@ def clean_env(monkeypatch):
     for k in [
         "USE_REAL_LLM_PROVIDER", "USE_REAL_IMAGE_PROVIDER", "USE_REAL_VIDEO_PROVIDER",
         "USE_REAL_VOICE_PROVIDER", "USE_REAL_MUSIC_PROVIDER", "USE_REAL_EXPORT_PROVIDER",
+        "SECRETS_BACKEND", "SSM_PROVIDER_KEY_PREFIX", "AWS_REGION",
     ]:
         monkeypatch.delenv(k, raising=False)
     yield
@@ -177,6 +178,24 @@ def test_provider_status_snapshot(clean_env):
     assert snap["mode"] == "mock"
     assert snap["would_use_real_provider"] is False
     assert snap["key_status"] == "not_configured"
+    assert snap["secrets_backend"] == "disabled"
+    assert snap["selected_provider"] == "ffmpeg-local"
+    assert snap["selected_model"] == "ffmpeg-6"
+    assert snap["status"] == "mock"
+
+
+def test_provider_status_image_blocked_when_flag_on_and_key_missing(monkeypatch):
+    monkeypatch.setenv("USE_REAL_IMAGE_PROVIDER", "true")
+    monkeypatch.setenv("SECRETS_BACKEND", "disabled")
+
+    snap = provider_status(modality="image", project=None, global_settings=GLOBAL)
+
+    assert snap["feature_flag_enabled"] is True
+    assert snap["key_present"] is False
+    assert snap["key_status"] == "not_configured"
+    assert snap["secrets_backend"] == "disabled"
+    assert snap["would_use_real_provider"] is False
+    assert snap["status"] == "blocked"
 
 
 def test_provider_status_rejects_unknown_modality():

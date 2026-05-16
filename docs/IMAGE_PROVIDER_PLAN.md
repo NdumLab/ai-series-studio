@@ -67,6 +67,17 @@ for character consistency, but the first production seam should be conservative.
 
 ## Secrets Strategy
 
+Current implementation status:
+
+- `backend/secrets_resolver.py` exists.
+- Default `SECRETS_BACKEND=disabled` returns safe `not_configured`.
+- `SECRETS_BACKEND=ssm` attempts AWS SSM Parameter Store lookup and fails
+  closed if AWS SDK/configuration/parameter lookup is unavailable.
+- Secret values are never returned to provider status responses or frontend
+  code.
+- Non-LLM providers still remain blocked because no real provider class is
+  connected yet.
+
 Rules:
 
 - Do not store provider keys in MongoDB.
@@ -78,10 +89,12 @@ Rules:
 Local/test placeholders only:
 
 ```bash
+SECRETS_BACKEND=disabled
+AWS_REGION=us-east-1
+SSM_PROVIDER_KEY_PREFIX=/ai-series-studio/providers
 USE_REAL_IMAGE_PROVIDER=false
 IMAGE_REAL_PROVIDER=openai
 IMAGE_REAL_MODEL=gpt-image-1
-OPENAI_IMAGE_API_KEY=
 IMAGE_PROVIDER_SECRET_REF=
 ```
 
@@ -105,6 +118,14 @@ Production shape:
 - Set `IMAGE_PROVIDER_SECRET_REF` to that parameter name.
 - Backend resolves the secret at runtime using IAM; the secret value never
   enters MongoDB or frontend responses.
+
+Provider key naming convention:
+
+- `/ai-series-studio/providers/image/openai/api-key`
+- `/ai-series-studio/providers/image/gemini/api-key`
+- `/ai-series-studio/providers/image/fal/api-key`
+- `/ai-series-studio/providers/video/luma/api-key`
+- `/ai-series-studio/providers/voice/elevenlabs/api-key`
 
 ## Feature Flag Gate
 
