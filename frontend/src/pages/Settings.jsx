@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../components/ui/select";
-import { Billing, ProviderSettings } from "../lib/api";
+import { apiErrorMessage, Billing, Credits, ProviderSettings } from "../lib/api";
 
 const SECTIONS = [
   {
@@ -67,7 +67,9 @@ export default function Settings() {
   const [catalog, setCatalog] = useState(null);
   const [settings, setSettings] = useState(null);
   const [billing, setBilling] = useState(null);
+  const [credits, setCredits] = useState(null);
   const [draft, setDraft] = useState({});
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -75,10 +77,12 @@ export default function Settings() {
       ProviderSettings.options(),
       ProviderSettings.get(),
       Billing.status(),
-    ]).then(([opt, s, b]) => {
+      Credits.status(),
+    ]).then(([opt, s, b, c]) => {
       setCatalog(opt.catalog);
       setSettings(s);
       setBilling(b);
+      setCredits(c);
       const d = {};
       for (const k of SECTIONS.map((x) => x.key)) d[k] = { ...s[k] };
       setDraft(d);
@@ -132,6 +136,18 @@ export default function Settings() {
     }
   };
 
+  const buyCredits = async () => {
+    setCheckoutBusy(true);
+    try {
+      const res = await Billing.createCheckoutSession();
+      window.location.assign(res.checkout_url);
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Stripe test checkout is not configured."));
+    } finally {
+      setCheckoutBusy(false);
+    }
+  };
+
   return (
     <div className="es-fade">
       <div className="flex flex-col md:flex-row md:items-end md:justify-between mb-8 gap-4">
@@ -158,7 +174,14 @@ export default function Settings() {
 
       <MockBanner />
       <KeysBanner />
-      {billing && <BillingBanner billing={billing} />}
+      {billing && (
+        <BillingBanner
+          billing={billing}
+          credits={credits}
+          busy={checkoutBusy}
+          onBuy={buyCredits}
+        />
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6" data-testid="provider-grid">
         {SECTIONS.map((sec) => (
@@ -176,22 +199,42 @@ export default function Settings() {
   );
 }
 
-function BillingBanner({ billing }) {
+function BillingBanner({ billing, credits, busy, onBuy }) {
   return (
     <div
       data-testid="billing-status-banner"
-      className="es-card p-4 flex items-start gap-3 mt-3 border-white/10"
+      className="es-card p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4 mt-3 border-white/10"
     >
-      <CreditCard className="w-5 h-5 text-[#A1A1AA] mt-0.5" />
-      <div>
-        <p className="text-sm font-semibold text-white">
-          Stripe test metering {billing.enabled ? "configured" : "disabled"}
-        </p>
-        <p className="text-xs text-[#A1A1AA] mt-1">
-          {billing.message} Live payments are disabled; only server-side test-mode
-          environment variables are recognized.
-        </p>
+      <div className="flex items-start gap-3">
+        <CreditCard className="w-5 h-5 text-[#A1A1AA] mt-0.5" />
+        <div>
+          <p className="text-sm font-semibold text-white">
+            Stripe test checkout {billing.checkout_enabled ? "configured" : "disabled"}
+          </p>
+          <p className="text-xs text-[#A1A1AA] mt-1">
+            {billing.message} Live payments are disabled; only server-side test-mode
+            environment variables are recognized.
+          </p>
+          <p className="text-xs text-[#A1A1AA] mt-2 font-mono">
+            Wallet: {credits?.credits_available ?? "—"} credits · Pack: {billing.credit_pack_credits ?? 500} test credits
+          </p>
+          {billing.missing_config?.length > 0 && (
+            <p className="text-[11px] text-[#FFCC00] mt-1 font-mono">
+              Missing: {billing.missing_config.join(", ")}
+            </p>
+          )}
+        </div>
       </div>
+      <Button
+        type="button"
+        onClick={onBuy}
+        disabled={busy}
+        data-testid="buy-test-credits-btn"
+        className="bg-[#FF3B30] hover:bg-[#FF453A] text-white"
+      >
+        <CreditCard className="w-4 h-4 mr-2" />
+        {busy ? "Opening..." : "Buy test credits"}
+      </Button>
     </div>
   );
 }

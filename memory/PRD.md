@@ -41,9 +41,9 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 - Per-user credit balances, `GET /api/credits/status`, credit event logging,
   and insufficient-credit blocking are implemented for generation actions.
 - Stripe test-mode readiness gate exists: `GET /api/billing/status`, a billing
-  config helper, disabled env placeholders, and Settings-page status. Stripe
-  SDK/network calls, checkout sessions, webhooks, live payments, and real
-  credentials are not implemented or committed.
+  config helper, disabled env placeholders, Settings-page status, test-only
+  checkout session creation, and verified webhook credit fulfillment. Live
+  payments and real credentials are not implemented or committed.
 - Current backend suite has grown substantially since the MVP baseline; see later iteration notes for exact counts.
 
 ## P1 Completed
@@ -81,7 +81,7 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 ## Backlog (P2)
 - Production auth/user ownership hardening.
 - Stripe credit fulfillment tied to users.
-- Stripe checkout/session creation and webhooks.
+- Production Stripe hardening / live billing decision.
 - Real Image provider.
 - Real Video provider.
 - Real Voice provider.
@@ -167,6 +167,21 @@ because billing and credit fulfillment need a reliable user owner.
   admin protection, and cross-user project/nested-resource ownership.
 - No Stripe checkout/webhooks, API key inputs, real media providers, or real
   secrets were added.
+
+## Iteration 29 (2026-05) — Stripe test checkout and webhook fulfillment
+- Added test-mode-only `POST /api/billing/create-checkout-session`.
+- Checkout refuses to run unless `STRIPE_TEST_MODE=true`, the secret key is a
+  `sk_test_...` key, and `STRIPE_CREDIT_PRICE_ID` is configured.
+- Added `POST /api/billing/webhook` with Stripe signature verification through
+  `STRIPE_WEBHOOK_SECRET`.
+- `checkout.session.completed` reads `user_id` and `credits` metadata, credits
+  the matching user wallet, records `billing_events`, and writes positive
+  `credit_events`.
+- Webhook processing is idempotent by Stripe event id and session id.
+- Settings shows current wallet credits, Stripe test checkout status, missing
+  config, and a Buy test credits button.
+- No live payments, card storage, API key inputs, real media providers, or real
+  credentials were added.
 
 ## Iteration 2 (2026-02) — Workflow & Segment Model
 - Added persistent "Mock Mode: No real AI APIs connected yet" badge in top nav.

@@ -108,9 +108,11 @@ shown above. Never commit real JWT secrets.
 
 ## Billing Status
 
-Stripe test-mode readiness gate is implemented. The app does not use the
-Stripe SDK, make Stripe network calls, create checkout sessions, handle
-webhooks, charge cards, or enable live payments yet.
+Stripe test-mode checkout and webhook credit fulfillment are implemented. The
+app refuses checkout unless `STRIPE_TEST_MODE=true`, the secret key is a
+`sk_test_...` key, and the credit price id is configured. Live payments are
+always disabled, card data is never stored, and webhook fulfillment is
+idempotent.
 
 ```http
 GET /api/billing/status
@@ -126,9 +128,24 @@ STRIPE_TEST_MODE=false
 STRIPE_SECRET_KEY=
 STRIPE_CREDIT_PRICE_ID=
 STRIPE_WEBHOOK_SECRET=
+STRIPE_CREDIT_PACK_CREDITS=500
+BILLING_SUCCESS_URL=http://localhost:3000/billing/success
+BILLING_CANCEL_URL=http://localhost:3000/billing/cancel
 ```
 
 No real credentials are committed.
+
+Checkout and webhook endpoints:
+
+```http
+POST /api/billing/create-checkout-session
+POST /api/billing/webhook
+```
+
+Checkout metadata includes `user_id`, `credits`, and `environment=test`.
+`checkout.session.completed` webhooks add credits to the matching user wallet,
+write `billing_events` and `credit_events`, and ignore duplicate event/session
+delivery.
 
 ## Credit Wallet
 

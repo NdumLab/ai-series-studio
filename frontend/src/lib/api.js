@@ -121,6 +121,8 @@ export const FeatureFlags = {
 
 export const Billing = {
   status: () => api.get("/billing/status").then((r) => r.data),
+  createCheckoutSession: () =>
+    api.post("/billing/create-checkout-session").then((r) => r.data),
 };
 
 export const Credits = {

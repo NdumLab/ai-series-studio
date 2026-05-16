@@ -1,5 +1,5 @@
 """AI Episode Studio - MVP backend (mock generation, no external APIs)."""
-from fastapi import FastAPI, APIRouter, Depends, Header, HTTPException
+from fastapi import FastAPI, APIRouter, Depends, Header, HTTPException, Request
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -11,6 +11,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
 import uuid
+import importlib
 from datetime import datetime, timezone, timedelta
 
 
@@ -861,6 +862,169 @@ async def billing_status():
     present and safe to use later.
     """
     return stripe_test_config()
+
+
+def _load_stripe():
+    try:
+        return importlib.import_module("stripe")
+    except ImportError as exc:
+        raise HTTPException(503, "Stripe SDK is not installed") from exc
+
+
+def _billing_checkout_config() -> dict:
+    cfg = stripe_test_config()
+    if not cfg["stripe_test_mode"]:
+        raise HTTPException(400, {
+            "message": "Stripe test checkout is not configured.",
+            "missing_config": cfg["missing_config"],
+        })
+    if not cfg["checkout_enabled"]:
+        raise HTTPException(400, {
+            "message": "Stripe test checkout is not configured.",
+            "missing_config": cfg["missing_config"],
+        })
+    return cfg
+
+
+@api.post("/billing/create-checkout-session")
+async def create_checkout_session(user: dict = Depends(current_user)):
+    """Create a Stripe Checkout Session for test-mode credit purchases only."""
+    cfg = _billing_checkout_config()
+    stripe_mod = _load_stripe()
+    stripe_mod.api_key = os.environ["STRIPE_SECRET_KEY"].strip()
+    credits = int(cfg["credit_pack_credits"])
+    success_url = cfg["success_url"]
+    if "{CHECKOUT_SESSION_ID}" not in success_url:
+        separator = "&" if "?" in success_url else "?"
+        success_url = f"{success_url}{separator}session_id={{CHECKOUT_SESSION_ID}}"
+    session = stripe_mod.checkout.Session.create(
+        mode="payment",
+        line_items=[{"price": os.environ["STRIPE_CREDIT_PRICE_ID"].strip(), "quantity": 1}],
+        success_url=success_url,
+        cancel_url=cfg["cancel_url"],
+        client_reference_id=user["id"],
+        metadata={
+            "user_id": user["id"],
+            "credits": str(credits),
+            "environment": "test",
+        },
+    )
+    return {"checkout_url": session.url, "session_id": session.id}
+
+
+async def _fulfill_checkout_session(session: dict, stripe_event_id: str) -> dict:
+    metadata = session.get("metadata") or {}
+    user_id = (metadata.get("user_id") or session.get("client_reference_id") or "").strip()
+    try:
+        credits = int(metadata.get("credits") or 0)
+    except (TypeError, ValueError):
+        credits = 0
+    stripe_session_id = session.get("id")
+    now = now_iso()
+    if not stripe_session_id:
+        raise HTTPException(400, "Stripe session id missing")
+    existing_event = await db.billing_events.find_one({"stripe_event_id": stripe_event_id}, {"_id": 0})
+    if existing_event and existing_event.get("status") == "processed":
+        return {"ok": True, "duplicate": True, "status": "processed"}
+    existing_session = await db.billing_events.find_one(
+        {"stripe_session_id": stripe_session_id, "status": "processed"},
+        {"_id": 0},
+    )
+    if existing_session:
+        await db.billing_events.update_one(
+            {"stripe_event_id": stripe_event_id},
+            {
+                "$setOnInsert": {
+                    "id": new_id(),
+                    "stripe_event_id": stripe_event_id,
+                    "stripe_session_id": stripe_session_id,
+                    "user_id": user_id,
+                    "credits": credits,
+                    "status": "duplicate",
+                    "created_at": now,
+                    "processed_at": now,
+                }
+            },
+            upsert=True,
+        )
+        return {"ok": True, "duplicate": True, "status": "processed"}
+    await db.billing_events.update_one(
+        {"stripe_event_id": stripe_event_id},
+        {
+            "$setOnInsert": {
+                "id": new_id(),
+                "stripe_event_id": stripe_event_id,
+                "stripe_session_id": stripe_session_id,
+                "user_id": user_id,
+                "credits": credits,
+                "status": "pending",
+                "created_at": now,
+            }
+        },
+        upsert=True,
+    )
+    if not user_id or credits <= 0:
+        await db.billing_events.update_one(
+            {"stripe_event_id": stripe_event_id},
+            {"$set": {"status": "failed", "error": "Invalid checkout metadata", "processed_at": now_iso()}},
+        )
+        raise HTTPException(400, "Invalid checkout metadata")
+    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not user:
+        await db.billing_events.update_one(
+            {"stripe_event_id": stripe_event_id},
+            {"$set": {"status": "failed", "error": "User not found", "processed_at": now_iso()}},
+        )
+        raise HTTPException(404, "Checkout user not found")
+    await db.users.update_one(
+        {"id": user_id},
+        {"$inc": {"credits": credits}, "$set": {"updated_at": now_iso()}},
+    )
+    updated = await db.users.find_one({"id": user_id}, {"_id": 0})
+    balance_after = _credit_status_from_user(updated)["credits_available"]
+    event_now = now_iso()
+    await db.credit_events.insert_one({
+        "id": new_id(),
+        "user_id": user_id,
+        "project_id": None,
+        "operation": "stripe_checkout",
+        "credits_delta": credits,
+        "balance_after": balance_after,
+        "reason": "stripe_checkout_completed",
+        "created_at": event_now,
+    })
+    await db.billing_events.update_one(
+        {"stripe_event_id": stripe_event_id},
+        {"$set": {"status": "processed", "processed_at": event_now, "balance_after": balance_after}},
+    )
+    return {"ok": True, "duplicate": False, "status": "processed", "credits": credits}
+
+
+async def _handle_stripe_webhook(payload: bytes, signature: str | None) -> dict:
+    cfg = stripe_test_config()
+    if not cfg["webhook_configured"]:
+        raise HTTPException(400, "Stripe webhook is not configured")
+    stripe_mod = _load_stripe()
+    try:
+        event = stripe_mod.Webhook.construct_event(
+            payload,
+            signature or "",
+            os.environ["STRIPE_WEBHOOK_SECRET"].strip(),
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(400, "Invalid Stripe webhook signature") from exc
+    event_type = event.get("type")
+    if event_type != "checkout.session.completed":
+        return {"ok": True, "ignored": True, "type": event_type}
+    session = event.get("data", {}).get("object", {})
+    return await _fulfill_checkout_session(session, event.get("id", ""))
+
+
+@api.post("/billing/webhook")
+async def billing_webhook(request: Request):
+    payload = await request.body()
+    signature = request.headers.get("stripe-signature")
+    return await _handle_stripe_webhook(payload, signature)
 
 
 # ---------------------------------------------------------------------------

@@ -42,9 +42,9 @@ Completed today:
   balances, `GET /api/credits/status`, credit event logging, and
   insufficient-credit blocking for generation actions.
 - Billing readiness: Stripe test-mode readiness gate, billing config helper,
-  `GET /api/billing/status`, Settings-page status display, and disabled env
-  placeholders exist. No Stripe SDK/network calls, checkout sessions, webhooks,
-  live payments, or real credentials are present.
+  `GET /api/billing/status`, test-only checkout creation, verified webhook
+  credit fulfillment, Settings-page status display, and disabled env
+  placeholders exist. Live payments and real credentials are not allowed.
 - Admin monitoring: stats, users, projects, generations, credit events, failed
   jobs, provider activity, provider health, and Recently Deleted.
 - Soft delete/restore: dashboard undo, restore endpoint, Admin Recently
@@ -89,6 +89,7 @@ Completed:
 - [x] Basic auth and project ownership.
 - [x] Basic credit wallet and generation guardrails.
 - [x] Stripe test-mode readiness gate.
+- [x] Stripe test-mode checkout and webhook credit fulfillment.
 
 Remaining:
 
@@ -100,7 +101,7 @@ Remaining:
 - [ ] Real music/SFX provider.
 - [ ] Real FFmpeg export worker.
 - [ ] S3/R2 storage.
-- [ ] Stripe checkout/session creation and webhook credit fulfillment.
+- [ ] Production Stripe hardening and live billing decision.
 - [ ] Production deployment.
 - [ ] Basic rate limiting.
 - [ ] End-to-end real media test.
@@ -140,11 +141,12 @@ real Stripe checkout, webhook fulfillment, and paid provider work.
 - Completed: add Settings-page Stripe test metering status.
 - Completed: add disabled env placeholders:
   `STRIPE_TEST_MODE=false`, `STRIPE_SECRET_KEY=`,
-  `STRIPE_CREDIT_PRICE_ID=`, `STRIPE_WEBHOOK_SECRET=`.
-- Remaining: add checkout/session creation in test mode.
-- Remaining: add webhook credit fulfillment.
-- No Stripe SDK/network calls, real credentials, or checkout/webhook runtime
-  behavior are implemented yet.
+- Completed: add test-mode checkout session creation.
+- Completed: add verified webhook credit fulfillment.
+- Completed: record idempotent `billing_events` and positive wallet
+  `credit_events`.
+- No live credentials, live payments, card storage, or production billing are
+  implemented.
 - Live payments remain disabled.
 
 Important roadmap note: production-grade auth/user ownership must be settled

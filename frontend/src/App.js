@@ -7,6 +7,7 @@ import ProjectStudio from "@/pages/ProjectStudio";
 import Admin from "@/pages/Admin";
 import Settings from "@/pages/Settings";
 import Login from "@/pages/Login";
+import { BillingCancel, BillingSuccess } from "@/pages/BillingResult";
 
 function App() {
   return (
@@ -17,6 +18,8 @@ function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/projects/:id" element={<ProjectStudio />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/billing/success" element={<BillingSuccess />} />
+            <Route path="/billing/cancel" element={<BillingCancel />} />
             <Route path="/admin" element={<Admin />} />
             <Route path="/login" element={<Login />} />
           </Route>

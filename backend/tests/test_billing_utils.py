@@ -11,7 +11,10 @@ def test_stripe_disabled_by_default():
     cfg = stripe_test_config({})
 
     assert cfg["enabled"] is False
+    assert cfg["checkout_enabled"] is False
+    assert cfg["stripe_test_mode"] is False
     assert cfg["mode"] == "disabled"
+    assert "STRIPE_TEST_MODE" in cfg["missing_config"]
     assert cfg["live_payments_enabled"] is False
 
 
@@ -23,7 +26,9 @@ def test_stripe_requires_test_mode_key_and_price():
     })
 
     assert cfg["enabled"] is False
+    assert cfg["checkout_enabled"] is False
     assert cfg["secret_key_is_test"] is False
+    assert "STRIPE_SECRET_KEY_TEST_MODE" in cfg["missing_config"]
     assert cfg["live_payments_enabled"] is False
 
 
@@ -36,8 +41,13 @@ def test_stripe_test_mode_configured():
     })
 
     assert cfg["enabled"] is True
+    assert cfg["checkout_enabled"] is True
     assert cfg["mode"] == "test"
+    assert cfg["missing_config"] == []
     assert cfg["secret_key_configured"] is True
     assert cfg["price_id_configured"] is True
+    assert cfg["configured_price_id_present"] is True
     assert cfg["webhook_secret_configured"] is True
+    assert cfg["webhook_configured"] is True
+    assert cfg["credit_pack_credits"] == 500
     assert cfg["live_payments_enabled"] is False
