@@ -105,11 +105,17 @@ Remaining:
 
 ## E. Recommended Build Order From Here
 
+Auth planning and production hardening details live in
+[`docs/AUTH_PLAN.md`](AUTH_PLAN.md). Auth/user ownership must remain ahead of
+real Stripe checkout, webhook fulfillment, and paid provider work.
+
 ### Phase 1: Auth and ownership
 
 - Completed: add login/register.
 - Completed: support real beta users while preserving `user-demo` local mode.
 - Completed: ensure projects belong to the authenticated user.
+- Next: production hardening plan is documented; implement it before real paid
+  checkout/webhook flows.
 
 ### Phase 2: Credit wallet and cost guardrails
 

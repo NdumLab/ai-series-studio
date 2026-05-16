@@ -53,6 +53,8 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 
 ## MVP Roadmap
 - Canonical MVP completion plan: `docs/MVP_PLAN.md`.
+- Auth planning and production ownership hardening plan:
+  `docs/AUTH_PLAN.md`.
 - Current MVP status: mock-first workflow is mature; real LLM is gated and
   available for text operations; image/video/voice/music/export remain
   mock-only.
@@ -91,6 +93,17 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 
 Auth and user ownership must come before real Stripe checkout/webhook work
 because billing and credit fulfillment need a reliable user owner.
+
+## Auth Plan
+- `docs/AUTH_PLAN.md` compares Emergent Google login, custom JWT auth, and
+  future multi-tenant team support.
+- Recommended MVP direction: keep the current local email/password auth as the
+  development baseline, prefer controlled Google login for private beta if the
+  deployment platform provides it cleanly, and defer multi-tenant teams until
+  after the single-user paid MVP works.
+- `AUTH_DEMO_MODE=true` remains local-only; production/private beta should use
+  authenticated users and real project ownership before Stripe checkout,
+  webhooks, or paid provider calls.
 
 ## Iteration 25 (2026-05) — MVP auth and ownership
 - Added local email/password auth endpoints:
