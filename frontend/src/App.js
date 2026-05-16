@@ -6,6 +6,7 @@ import Dashboard from "@/pages/Dashboard";
 import ProjectStudio from "@/pages/ProjectStudio";
 import Admin from "@/pages/Admin";
 import Settings from "@/pages/Settings";
+import Login from "@/pages/Login";
 
 function App() {
   return (
@@ -17,6 +18,7 @@ function App() {
             <Route path="/projects/:id" element={<ProjectStudio />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/admin" element={<Admin />} />
+            <Route path="/login" element={<Login />} />
           </Route>
         </Routes>
       </BrowserRouter>

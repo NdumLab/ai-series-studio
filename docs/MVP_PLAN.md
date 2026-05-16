@@ -22,6 +22,9 @@ Completed today:
   enhancement, image/video prompt surfaces, and scene reorder.
 - Character workflow: Cast view, character CRUD, per-character voice override,
   character `order`, and character drag handles/reorder.
+- Auth and ownership: local email/password beta accounts, bearer sessions,
+  per-user project scoping, and `AUTH_DEMO_MODE=true` compatibility for
+  no-token local demos.
 - Reorder workflows: scenes, segments, and characters all support persisted
   ordering with optimistic frontend updates.
 - Creative Quality Engine: story scores, scene tension fields, improvement
@@ -76,10 +79,10 @@ Completed:
 - [x] Soft delete / restore / purge.
 - [x] Admin monitoring.
 - [x] Local setup docs.
+- [x] Basic auth and project ownership.
 
 Remaining:
 
-- [ ] Auth.
 - [ ] Real image provider.
 - [ ] Real video provider.
 - [ ] Real voice provider.
@@ -95,9 +98,9 @@ Remaining:
 
 ### Phase 1: Auth and ownership
 
-- Add login.
-- Replace `user-demo` with real users.
-- Ensure projects belong to users.
+- Completed: add login/register.
+- Completed: support real beta users while preserving `user-demo` local mode.
+- Completed: ensure projects belong to the authenticated user.
 
 ### Phase 2: Credit wallet and cost guardrails
 

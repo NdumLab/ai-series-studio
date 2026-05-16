@@ -1,5 +1,5 @@
-"""AI Episode Studio – MVP backend (mock generation, no external APIs)."""
-from fastapi import FastAPI, APIRouter, HTTPException
+"""AI Episode Studio - MVP backend (mock generation, no external APIs)."""
+from fastapi import FastAPI, APIRouter, Depends, Header, HTTPException
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -7,6 +7,7 @@ import os
 import asyncio
 import logging
 import random
+import secrets
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
@@ -55,6 +56,13 @@ from creative_quality import (  # noqa: E402
     IMAGE_ENHANCEMENT_HINT,
     VIDEO_ENHANCEMENT_HINT,
 )
+from auth_utils import (  # noqa: E402
+    bearer_token,
+    hash_password,
+    normalize_email,
+    public_user,
+    verify_password,
+)
 
 
 # Activity recorder — writes safe metadata to the `provider_activity` collection.
@@ -88,6 +96,10 @@ DEFAULT_USER = {
     "credits": 250,
     "created_at": datetime.now(timezone.utc).isoformat(),
 }
+
+# Local development remains demo-friendly: requests without a bearer token use
+# the seeded demo user. Authenticated beta users receive isolated projects.
+AUTH_DEMO_MODE = os.environ.get("AUTH_DEMO_MODE", "true").strip().lower() != "false"
 
 MOCK_SCENE_IMAGES = [
     "https://static.prod-images.emergentagent.com/jobs/79e2f754-43ce-44a2-9d11-60523bb0d255/images/623d1bffe45150b2f2ede70157aed5fe723bbd8f51fa49c37a6ca79970a2b82c.png",
@@ -335,10 +347,11 @@ def new_id() -> str:
 
 
 async def log_generation(gen_type: str, project_id: Optional[str], cost: int,
-                         status: str = "success", error: Optional[str] = None) -> None:
+                         status: str = "success", error: Optional[str] = None,
+                         user_id: str = DEFAULT_USER_ID) -> None:
     await db.generations.insert_one({
         "id": new_id(),
-        "user_id": DEFAULT_USER_ID,
+        "user_id": user_id,
         "project_id": project_id,
         "type": gen_type,
         "cost_credits": cost,
@@ -354,12 +367,89 @@ async def ensure_default_user() -> None:
         await db.users.insert_one(DEFAULT_USER.copy())
 
 
+async def _create_session(user_id: str) -> dict:
+    token = secrets.token_urlsafe(32)
+    doc = {
+        "id": new_id(),
+        "token": token,
+        "user_id": user_id,
+        "created_at": now_iso(),
+    }
+    await db.user_sessions.insert_one(doc.copy())
+    return doc
+
+
+async def current_user(authorization: Optional[str] = Header(None)) -> dict:
+    await ensure_default_user()
+    token = bearer_token(authorization)
+    if token:
+        sess = await db.user_sessions.find_one({"token": token}, {"_id": 0})
+        if not sess:
+            raise HTTPException(401, "Invalid or expired session")
+        user = await db.users.find_one({"id": sess["user_id"]}, {"_id": 0})
+        if not user:
+            raise HTTPException(401, "Session user not found")
+        return user
+    if AUTH_DEMO_MODE:
+        return await db.users.find_one({"id": DEFAULT_USER_ID}, {"_id": 0})
+    raise HTTPException(401, "Authentication required")
+
+
+def _project_owner_filter(project_id: str, user: dict, include_deleted: bool = False) -> dict:
+    base = {"id": project_id, "user_id": user["id"]}
+    return base if include_deleted else _active_project_filter(base)
+
+
+async def _owned_project(project_id: str, user: dict, include_deleted: bool = False) -> dict:
+    proj = await db.projects.find_one(
+        _project_owner_filter(project_id, user, include_deleted), {"_id": 0}
+    )
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    return proj
+
+
+async def _owned_scene(scene_id: str, user: dict) -> dict:
+    scene = await db.scenes.find_one({"id": scene_id}, {"_id": 0})
+    if not scene:
+        raise HTTPException(404, "Scene not found")
+    await _owned_project(scene["project_id"], user)
+    return scene
+
+
+async def _owned_character(character_id: str, user: dict) -> dict:
+    char = await db.characters.find_one({"id": character_id}, {"_id": 0})
+    if not char:
+        raise HTTPException(404, "Character not found")
+    await _owned_project(char["project_id"], user)
+    return char
+
+
+async def _owned_segment(segment_id: str, user: dict) -> dict:
+    seg = await db.segments.find_one({"id": segment_id}, {"_id": 0})
+    if not seg:
+        raise HTTPException(404, "Segment not found")
+    await _owned_project(seg["project_id"], user)
+    return seg
+
+
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
 class ProjectCreate(BaseModel):
     title: str
     idea: str = ""
+
+
+class AuthRegister(BaseModel):
+    name: str
+    email: str
+    password: str
+
+
+class AuthLogin(BaseModel):
+    email: str
+    password: str
 
 
 class ProjectUpdate(BaseModel):
@@ -506,10 +596,59 @@ async def meta_options():
     }
 
 
+@api.post("/auth/register")
+async def auth_register(body: AuthRegister):
+    email = normalize_email(body.email)
+    name = body.name.strip()
+    password = body.password or ""
+    if not name:
+        raise HTTPException(400, "Name is required")
+    if "@" not in email:
+        raise HTTPException(400, "Valid email is required")
+    if len(password) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters")
+    existing = await db.users.find_one({"email": email}, {"_id": 0})
+    if existing:
+        raise HTTPException(400, "Email is already registered")
+    salt, digest = hash_password(password)
+    user = {
+        "id": new_id(),
+        "name": name,
+        "email": email,
+        "role": "creator",
+        "credits": 250,
+        "password_salt": salt,
+        "password_hash": digest,
+        "created_at": now_iso(),
+    }
+    await db.users.insert_one(user.copy())
+    session = await _create_session(user["id"])
+    return {"token": session["token"], "user": public_user(user)}
+
+
+@api.post("/auth/login")
+async def auth_login(body: AuthLogin):
+    email = normalize_email(body.email)
+    user = await db.users.find_one({"email": email}, {"_id": 0})
+    if not user or not user.get("password_hash") or not user.get("password_salt"):
+        raise HTTPException(401, "Invalid email or password")
+    if not verify_password(body.password or "", user["password_salt"], user["password_hash"]):
+        raise HTTPException(401, "Invalid email or password")
+    session = await _create_session(user["id"])
+    return {"token": session["token"], "user": public_user(user)}
+
+
+@api.post("/auth/logout")
+async def auth_logout(authorization: Optional[str] = Header(None)):
+    token = bearer_token(authorization)
+    if token:
+        await db.user_sessions.delete_one({"token": token})
+    return {"ok": True}
+
+
 @api.get("/me")
-async def me():
-    await ensure_default_user()
-    return await db.users.find_one({"id": DEFAULT_USER_ID}, {"_id": 0})
+async def me(user: dict = Depends(current_user)):
+    return public_user(user)
 
 
 @api.get("/feature-flags")
@@ -527,7 +666,7 @@ class UnifiedProviderTestRequest(BaseModel):
 
 
 @api.post("/providers/test")
-async def providers_test(body: UnifiedProviderTestRequest):
+async def providers_test(body: UnifiedProviderTestRequest, user: dict = Depends(current_user)):
     """Dry-run for any modality. No real network call is ever made.
 
     Returns the resolved provider, feature flag state, and key status so the
@@ -535,9 +674,7 @@ async def providers_test(body: UnifiedProviderTestRequest):
     """
     project = None
     if body.project_id:
-        project = await db.projects.find_one({"id": body.project_id}, {"_id": 0})
-        if not project:
-            raise HTTPException(404, "Project not found")
+        project = await _owned_project(body.project_id, user)
     global_settings = await _load_provider_settings()
     return await run_modality_test(
         modality=body.modality,
@@ -547,15 +684,17 @@ async def providers_test(body: UnifiedProviderTestRequest):
 
 
 @api.get("/providers/{modality}/status")
-async def providers_status_endpoint(modality: str, project_id: Optional[str] = None):
+async def providers_status_endpoint(
+    modality: str,
+    project_id: Optional[str] = None,
+    user: dict = Depends(current_user),
+):
     """Snapshot of resolved provider, feature flag and key for one modality."""
     if modality not in PROVIDER_LAYER_MODALITIES:
         raise HTTPException(400, f"Unknown modality: {modality}")
     project = None
     if project_id:
-        project = await db.projects.find_one({"id": project_id}, {"_id": 0})
-        if not project:
-            raise HTTPException(404, "Project not found")
+        project = await _owned_project(project_id, user)
     global_settings = await _load_provider_settings()
     return provider_status(
         modality=modality,  # type: ignore[arg-type]
@@ -629,10 +768,8 @@ async def _build_effective_providers(project: dict) -> dict:
 
 
 @api.get("/projects/{project_id}/providers")
-async def get_project_providers(project_id: str):
-    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
-    if not proj:
-        raise HTTPException(404, "Project not found")
+async def get_project_providers(project_id: str, user: dict = Depends(current_user)):
+    proj = await _owned_project(project_id, user)
     effective = await _build_effective_providers(proj)
     project_view = {
         modality: _project_modality_view(proj, modality, "project")
@@ -649,10 +786,12 @@ async def get_project_providers(project_id: str):
 
 
 @api.put("/projects/{project_id}/providers")
-async def update_project_providers(project_id: str, body: ProjectProvidersUpdate):
-    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
-    if not proj:
-        raise HTTPException(404, "Project not found")
+async def update_project_providers(
+    project_id: str,
+    body: ProjectProvidersUpdate,
+    user: dict = Depends(current_user),
+):
+    proj = await _owned_project(project_id, user)
     payload = body.model_dump(exclude_none=True)
 
     # Validate any provided provider id against the catalog (empty string clears it)
@@ -665,15 +804,16 @@ async def update_project_providers(project_id: str, body: ProjectProvidersUpdate
 
     payload["updated_at"] = now_iso()
     await db.projects.update_one({"id": project_id}, {"$set": payload})
-    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
-    return await get_project_providers(project_id)  # noqa: E501  (reuse the merged view)
+    return await get_project_providers(project_id, user)  # noqa: E501  (reuse the merged view)
 
 
 @api.post("/projects/{project_id}/providers/test")
-async def test_project_provider(project_id: str, body: ProviderTestRequest):
-    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
-    if not proj:
-        raise HTTPException(404, "Project not found")
+async def test_project_provider(
+    project_id: str,
+    body: ProviderTestRequest,
+    user: dict = Depends(current_user),
+):
+    proj = await _owned_project(project_id, user)
     effective = await _build_effective_providers(proj)
     cfg = effective.get(body.modality, {})
     flags = feature_flags()
@@ -691,12 +831,10 @@ async def test_project_provider(project_id: str, body: ProviderTestRequest):
 
 
 @api.get("/projects/{project_id}/voice-resolution")
-async def project_voice_resolution(project_id: str):
+async def project_voice_resolution(project_id: str, user: dict = Depends(current_user)):
     """Resolve effective voice per character with priority:
     character override → project override → global default."""
-    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
-    if not proj:
-        raise HTTPException(404, "Project not found")
+    proj = await _owned_project(project_id, user)
     effective = await _build_effective_providers(proj)
     project_voice = {
         "provider": effective["voice"]["provider"],
@@ -742,6 +880,7 @@ async def project_scene_costs(
     project_id: str,
     wallet_credits: Optional[int] = None,
     high_cost_pct: Optional[int] = None,
+    user: dict = Depends(current_user),
 ):
     """Per-scene credit estimate using the mock COSTS map.
 
@@ -752,9 +891,7 @@ async def project_scene_costs(
     Missing keys degrade gracefully (treated as 0) and the response flags
     `estimate_unavailable=True` for that scene if any unit cost is missing.
     """
-    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
-    if not proj:
-        raise HTTPException(404, "Project not found")
+    proj = await _owned_project(project_id, user)
 
     image_cost = COSTS.get("image")
     seg_cost = COSTS.get("video_segment")
@@ -824,11 +961,10 @@ async def project_scene_costs(
 # Projects
 # ---------------------------------------------------------------------------
 @api.post("/projects")
-async def create_project(body: ProjectCreate):
-    await ensure_default_user()
+async def create_project(body: ProjectCreate, user: dict = Depends(current_user)):
     doc = {
         "id": new_id(),
-        "user_id": DEFAULT_USER_ID,
+        "user_id": user["id"],
         "title": body.title,
         "idea": body.idea,
         "rewritten_story": "",
@@ -923,10 +1059,10 @@ def _active_project_filter(extra: Optional[dict] = None) -> dict:
 
 
 @api.get("/projects")
-async def list_projects():
+async def list_projects(user: dict = Depends(current_user)):
     cfg = studio_config()
     projects = await db.projects.find(
-        _active_project_filter(), {"_id": 0}
+        _active_project_filter({"user_id": user["id"]}), {"_id": 0}
     ).sort("created_at", -1).to_list(500)
     for p in projects:
         p["cost_summary"] = await _project_cost_summary(p["id"], cfg)
@@ -934,13 +1070,12 @@ async def list_projects():
 
 
 @api.get("/projects/{project_id}")
-async def get_project(project_id: str, include_deleted: bool = False):
-    query: dict = {"id": project_id}
-    if not include_deleted:
-        query = _active_project_filter({"id": project_id})
-    proj = await db.projects.find_one(query, {"_id": 0})
-    if not proj:
-        raise HTTPException(404, "Project not found")
+async def get_project(
+    project_id: str,
+    include_deleted: bool = False,
+    user: dict = Depends(current_user),
+):
+    proj = await _owned_project(project_id, user, include_deleted=include_deleted)
     scenes = await db.scenes.find({"project_id": project_id}, {"_id": 0}).sort("order", 1).to_list(500)
     characters = await _ordered_characters(project_id)
     # attach segments to each scene
@@ -950,21 +1085,21 @@ async def get_project(project_id: str, include_deleted: bool = False):
 
 
 @api.put("/projects/{project_id}")
-async def update_project(project_id: str, body: ProjectUpdate):
+async def update_project(project_id: str, body: ProjectUpdate, user: dict = Depends(current_user)):
     update = {k: v for k, v in body.model_dump(exclude_none=True).items()}
     if not update:
         raise HTTPException(400, "No fields to update")
     update["updated_at"] = now_iso()
     res = await db.projects.update_one(
-        _active_project_filter({"id": project_id}), {"$set": update}
+        _active_project_filter({"id": project_id, "user_id": user["id"]}), {"$set": update}
     )
     if res.matched_count == 0:
         raise HTTPException(404, "Project not found")
-    return await db.projects.find_one({"id": project_id}, {"_id": 0})
+    return await db.projects.find_one({"id": project_id, "user_id": user["id"]}, {"_id": 0})
 
 
 @api.delete("/projects/{project_id}")
-async def delete_project(project_id: str):
+async def delete_project(project_id: str, user: dict = Depends(current_user)):
     """Soft-delete a project.
 
     Sets deleted_at + delete_expires_at (now + 24h) and stashes the prior status
@@ -972,7 +1107,7 @@ async def delete_project(project_id: str):
     Child scenes/characters/segments are NOT touched yet — they're cleaned up by
     the purge endpoint after `delete_expires_at` passes.
     """
-    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    proj = await db.projects.find_one({"id": project_id, "user_id": user["id"]}, {"_id": 0})
     if not proj:
         return {
             "ok": True,
@@ -998,7 +1133,7 @@ async def delete_project(project_id: str):
         {"id": project_id},
         {"$set": {
             "deleted_at": deleted_at,
-            "deleted_by": DEFAULT_USER_ID,
+            "deleted_by": user["id"],
             "delete_expires_at": expires_at,
             "previous_status": previous_status,
             "status": "deleted",
@@ -1016,10 +1151,8 @@ async def delete_project(project_id: str):
 
 
 @api.post("/projects/{project_id}/restore")
-async def restore_project(project_id: str):
-    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
-    if not proj:
-        raise HTTPException(404, "Project not found")
+async def restore_project(project_id: str, user: dict = Depends(current_user)):
+    proj = await _owned_project(project_id, user, include_deleted=True)
     if not proj.get("deleted_at"):
         # Not soft-deleted — return as-is, no-op.
         return proj
@@ -1039,14 +1172,12 @@ async def restore_project(project_id: str):
             },
         },
     )
-    return await db.projects.find_one({"id": project_id}, {"_id": 0})
+    return await db.projects.find_one({"id": project_id, "user_id": user["id"]}, {"_id": 0})
 
 
 @api.post("/projects/{project_id}/rewrite")
-async def rewrite_story(project_id: str):
-    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
-    if not proj:
-        raise HTTPException(404, "Project not found")
+async def rewrite_story(project_id: str, user: dict = Depends(current_user)):
+    proj = await _owned_project(project_id, user)
     # Provider execution guard — blocks real LLM call if a flag were on, runs mock otherwise.
     global_settings = await _load_provider_settings()
     mock_text = mock_rewrite_story(proj.get("idea", ""))
@@ -1077,7 +1208,7 @@ async def rewrite_story(project_id: str):
             "updated_at": now_iso(),
         }},
     )
-    await log_generation("rewrite", project_id, COSTS["rewrite"])
+    await log_generation("rewrite", project_id, COSTS["rewrite"], user_id=user["id"])
     return {
         "rewritten_story": rewritten,
         "cost": COSTS["rewrite"],
@@ -1089,10 +1220,8 @@ async def rewrite_story(project_id: str):
 
 
 @api.post("/projects/{project_id}/split-scenes")
-async def split_scenes(project_id: str):
-    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
-    if not proj:
-        raise HTTPException(404, "Project not found")
+async def split_scenes(project_id: str, user: dict = Depends(current_user)):
+    proj = await _owned_project(project_id, user)
     # wipe existing scenes for clean split
     existing = await db.scenes.find({"project_id": project_id}, {"_id": 0, "id": 1}).to_list(500)
     for s in existing:
@@ -1113,7 +1242,7 @@ async def split_scenes(project_id: str):
     if new_scenes:
         await db.scenes.insert_many([s.copy() for s in new_scenes])
     await db.projects.update_one({"id": project_id}, {"$set": {"status": "scenes_ready", "updated_at": now_iso()}})
-    await log_generation("split_scenes", project_id, COSTS["split_scenes"])
+    await log_generation("split_scenes", project_id, COSTS["split_scenes"], user_id=user["id"])
     return {"scenes": new_scenes}
 
 
@@ -1129,10 +1258,8 @@ class EnhanceSceneRequest(BaseModel):
 
 
 @api.post("/projects/{project_id}/quality-score")
-async def recompute_quality_score(project_id: str):
-    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
-    if not proj:
-        raise HTTPException(404, "Project not found")
+async def recompute_quality_score(project_id: str, user: dict = Depends(current_user)):
+    proj = await _owned_project(project_id, user)
     scores = compute_quality_scores(proj.get("idea", ""), proj.get("rewritten_story", ""))
     await db.projects.update_one(
         {"id": project_id},
@@ -1142,10 +1269,8 @@ async def recompute_quality_score(project_id: str):
 
 
 @api.post("/projects/{project_id}/improve-story")
-async def improve_story(project_id: str, body: ImproveStoryRequest):
-    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
-    if not proj:
-        raise HTTPException(404, "Project not found")
+async def improve_story(project_id: str, body: ImproveStoryRequest, user: dict = Depends(current_user)):
+    proj = await _owned_project(project_id, user)
     if not (proj.get("rewritten_story") or "").strip():
         raise HTTPException(400, "Story is empty — rewrite it first.")
     mock_story, note = apply_improvement(proj["rewritten_story"], body.kind)
@@ -1196,10 +1321,8 @@ async def improve_story(project_id: str, body: ImproveStoryRequest):
 
 
 @api.post("/scenes/{scene_id}/enhance-prompt")
-async def enhance_scene_prompt(scene_id: str, body: EnhanceSceneRequest):
-    scene = await db.scenes.find_one({"id": scene_id}, {"_id": 0})
-    if not scene:
-        raise HTTPException(404, "Scene not found")
+async def enhance_scene_prompt(scene_id: str, body: EnhanceSceneRequest, user: dict = Depends(current_user)):
+    scene = await _owned_scene(scene_id, user)
     global_settings = await _load_provider_settings()
     proj = await db.projects.find_one({"id": scene["project_id"]}, {"_id": 0})
 
@@ -1305,10 +1428,8 @@ async def creative_enhancement_hints():
 # Characters
 # ---------------------------------------------------------------------------
 @api.post("/projects/{project_id}/characters")
-async def create_character(project_id: str, body: CharacterCreate):
-    project = await db.projects.find_one({"id": project_id}, {"_id": 0, "id": 1})
-    if not project:
-        raise HTTPException(404, "Project not found")
+async def create_character(project_id: str, body: CharacterCreate, user: dict = Depends(current_user)):
+    await _owned_project(project_id, user)
     await _ordered_characters(project_id)
     order = await db.characters.count_documents({"project_id": project_id})
     doc = {
@@ -1328,7 +1449,8 @@ async def create_character(project_id: str, body: CharacterCreate):
 
 
 @api.put("/characters/{character_id}")
-async def update_character(character_id: str, body: CharacterUpdate):
+async def update_character(character_id: str, body: CharacterUpdate, user: dict = Depends(current_user)):
+    await _owned_character(character_id, user)
     update = {k: v for k, v in body.model_dump(exclude_none=True).items()}
     if not update:
         raise HTTPException(400, "No fields")
@@ -1344,8 +1466,8 @@ async def update_character(character_id: str, body: CharacterUpdate):
 
 
 @api.delete("/characters/{character_id}")
-async def delete_character(character_id: str):
-    char = await db.characters.find_one({"id": character_id}, {"_id": 0})
+async def delete_character(character_id: str, user: dict = Depends(current_user)):
+    char = await _owned_character(character_id, user)
     await db.characters.delete_one({"id": character_id})
     if char:
         await _ordered_characters(char["project_id"])
@@ -1353,10 +1475,12 @@ async def delete_character(character_id: str):
 
 
 @api.put("/projects/{project_id}/characters/reorder")
-async def reorder_characters(project_id: str, body: ReorderCharactersBody):
-    project = await db.projects.find_one({"id": project_id}, {"_id": 0, "id": 1})
-    if not project:
-        raise HTTPException(404, "Project not found")
+async def reorder_characters(
+    project_id: str,
+    body: ReorderCharactersBody,
+    user: dict = Depends(current_user),
+):
+    await _owned_project(project_id, user)
     existing = await _ordered_characters(project_id)
     existing_ids = {c["id"] for c in existing}
     incoming = list(body.character_ids)
@@ -1377,7 +1501,8 @@ async def reorder_characters(project_id: str, body: ReorderCharactersBody):
 # Scenes
 # ---------------------------------------------------------------------------
 @api.post("/projects/{project_id}/scenes")
-async def create_scene(project_id: str, body: SceneCreate):
+async def create_scene(project_id: str, body: SceneCreate, user: dict = Depends(current_user)):
+    await _owned_project(project_id, user)
     count = await db.scenes.count_documents({"project_id": project_id})
     doc = {
         "id": new_id(),
@@ -1401,7 +1526,8 @@ async def create_scene(project_id: str, body: SceneCreate):
 
 
 @api.put("/scenes/{scene_id}")
-async def update_scene(scene_id: str, body: SceneUpdate):
+async def update_scene(scene_id: str, body: SceneUpdate, user: dict = Depends(current_user)):
+    await _owned_scene(scene_id, user)
     update = {k: v for k, v in body.model_dump(exclude_none=True).items()}
     if not update:
         raise HTTPException(400, "No fields")
@@ -1412,17 +1538,16 @@ async def update_scene(scene_id: str, body: SceneUpdate):
 
 
 @api.delete("/scenes/{scene_id}")
-async def delete_scene(scene_id: str):
+async def delete_scene(scene_id: str, user: dict = Depends(current_user)):
+    await _owned_scene(scene_id, user)
     await db.segments.delete_many({"scene_id": scene_id})
     await db.scenes.delete_one({"id": scene_id})
     return {"ok": True}
 
 
 @api.post("/scenes/{scene_id}/generate-image")
-async def generate_image(scene_id: str):
-    scene = await db.scenes.find_one({"id": scene_id}, {"_id": 0})
-    if not scene:
-        raise HTTPException(404, "Scene not found")
+async def generate_image(scene_id: str, user: dict = Depends(current_user)):
+    scene = await _owned_scene(scene_id, user)
     # Provider execution guard — verifies flag + key before any real call.
     proj = await db.projects.find_one({"id": scene["project_id"]}, {"_id": 0})
     global_settings = await _load_provider_settings()
@@ -1437,11 +1562,11 @@ async def generate_image(scene_id: str):
     log.info("provider.image mode=%s status=%s provider=%s/%s", guard.mode, guard.status, guard.provider_name, guard.model_name)
     # 5% mock failure to power admin failed jobs widget
     if random.random() < 0.05:
-        await log_generation("image", scene["project_id"], 0, status="failed", error="mock provider timeout")
+        await log_generation("image", scene["project_id"], 0, status="failed", error="mock provider timeout", user_id=user["id"])
         raise HTTPException(503, "Mock image provider timed out")
     url = random.choice(MOCK_SCENE_IMAGES)
     await db.scenes.update_one({"id": scene_id}, {"$set": {"image_url": url, "status": "image_ready"}})
-    await log_generation("image", scene["project_id"], COSTS["image"])
+    await log_generation("image", scene["project_id"], COSTS["image"], user_id=user["id"])
     return {"image_url": url, "cost": COSTS["image"]}
 
 
@@ -1450,15 +1575,14 @@ async def _create_scene_segment(
     *,
     expand_mode: str,
     continuity_prompt: Optional[str],
+    user: dict,
 ) -> dict:
     """Create a new 5s mock video segment for a scene.
 
     expand_mode = "initial" → first segment (parent_segment_id = None, start_second = 0)
     expand_mode = "expand"  → continues from latest segment under the same scene.
     """
-    scene = await db.scenes.find_one({"id": scene_id}, {"_id": 0})
-    if not scene:
-        raise HTTPException(404, "Scene not found")
+    scene = await _owned_scene(scene_id, user)
     # Provider execution guard for video generation.
     proj = await db.projects.find_one({"id": scene["project_id"]}, {"_id": 0})
     global_settings = await _load_provider_settings()
@@ -1472,7 +1596,7 @@ async def _create_scene_segment(
     )
     log.info("provider.video mode=%s status=%s provider=%s/%s", guard.mode, guard.status, guard.provider_name, guard.model_name)
     if random.random() < 0.05:
-        await log_generation("video_segment", scene["project_id"], 0, status="failed", error="mock render failed")
+        await log_generation("video_segment", scene["project_id"], 0, status="failed", error="mock render failed", user_id=user["id"])
         raise HTTPException(503, "Mock video render failed")
 
     siblings = await db.segments.find({"scene_id": scene_id}, {"_id": 0}).sort("order", 1).to_list(200)
@@ -1502,33 +1626,44 @@ async def _create_scene_segment(
     }
     await db.segments.insert_one(doc.copy())
     await db.scenes.update_one({"id": scene_id}, {"$set": {"status": "video_ready"}})
-    await log_generation("video_segment", scene["project_id"], COSTS["video_segment"])
+    await log_generation("video_segment", scene["project_id"], COSTS["video_segment"], user_id=user["id"])
     return doc
 
 
 @api.post("/scenes/{scene_id}/segments")
-async def create_segment(scene_id: str, body: Optional[SegmentCreate] = None):
+async def create_segment(
+    scene_id: str,
+    body: Optional[SegmentCreate] = None,
+    user: dict = Depends(current_user),
+):
     siblings_count = await db.segments.count_documents({"scene_id": scene_id})
     mode = "initial" if siblings_count == 0 else "expand"
     return await _create_scene_segment(
         scene_id,
         expand_mode=mode,
         continuity_prompt=body.continuity_prompt if body else None,
+        user=user,
     )
 
 
 @api.post("/scenes/{scene_id}/expand")
-async def expand_segment(scene_id: str, body: Optional[SegmentCreate] = None):
+async def expand_segment(
+    scene_id: str,
+    body: Optional[SegmentCreate] = None,
+    user: dict = Depends(current_user),
+):
     """Always treated as expansion of the latest segment ("+5s next")."""
     return await _create_scene_segment(
         scene_id,
         expand_mode="expand",
         continuity_prompt=body.continuity_prompt if body else None,
+        user=user,
     )
 
 
 @api.put("/segments/{segment_id}/status")
-async def set_segment_status(segment_id: str, body: SegmentStatus):
+async def set_segment_status(segment_id: str, body: SegmentStatus, user: dict = Depends(current_user)):
+    await _owned_segment(segment_id, user)
     res = await db.segments.update_one({"id": segment_id}, {"$set": {"status": body.status}})
     if res.matched_count == 0:
         raise HTTPException(404, "Segment not found")
@@ -1536,9 +1671,10 @@ async def set_segment_status(segment_id: str, body: SegmentStatus):
 
 
 @api.put("/segments/{segment_id}")
-async def update_segment(segment_id: str, body: SegmentUpdate):
+async def update_segment(segment_id: str, body: SegmentUpdate, user: dict = Depends(current_user)):
     """Generic partial update for a segment. Coexists with the dedicated
     /status route — both write to the same fields."""
+    await _owned_segment(segment_id, user)
     update = {k: v for k, v in body.model_dump(exclude_none=True).items()}
     if not update:
         raise HTTPException(400, "No fields to update")
@@ -1554,10 +1690,8 @@ async def update_segment(segment_id: str, body: SegmentUpdate):
 
 
 @api.put("/projects/{project_id}/scenes/reorder")
-async def reorder_scenes(project_id: str, body: ReorderScenesBody):
-    proj = await db.projects.find_one({"id": project_id}, {"_id": 0, "id": 1})
-    if not proj:
-        raise HTTPException(404, "Project not found")
+async def reorder_scenes(project_id: str, body: ReorderScenesBody, user: dict = Depends(current_user)):
+    await _owned_project(project_id, user)
     existing = await db.scenes.find(
         {"project_id": project_id}, {"_id": 0, "id": 1}
     ).to_list(500)
@@ -1572,10 +1706,8 @@ async def reorder_scenes(project_id: str, body: ReorderScenesBody):
 
 
 @api.put("/scenes/{scene_id}/segments/reorder")
-async def reorder_segments(scene_id: str, body: ReorderSegmentsBody):
-    scene = await db.scenes.find_one({"id": scene_id}, {"_id": 0, "id": 1})
-    if not scene:
-        raise HTTPException(404, "Scene not found")
+async def reorder_segments(scene_id: str, body: ReorderSegmentsBody, user: dict = Depends(current_user)):
+    await _owned_scene(scene_id, user)
     existing = await db.segments.find(
         {"scene_id": scene_id}, {"_id": 0}
     ).to_list(200)
@@ -1601,30 +1733,26 @@ async def reorder_segments(scene_id: str, body: ReorderSegmentsBody):
 
 
 @api.post("/segments/{segment_id}/regenerate")
-async def regenerate_segment(segment_id: str):
-    seg = await db.segments.find_one({"id": segment_id}, {"_id": 0})
-    if not seg:
-        raise HTTPException(404, "Segment not found")
+async def regenerate_segment(segment_id: str, user: dict = Depends(current_user)):
+    seg = await _owned_segment(segment_id, user)
     if random.random() < 0.05:
-        await log_generation("video_segment", seg.get("project_id"), 0, status="failed", error="mock regen failed")
+        await log_generation("video_segment", seg.get("project_id"), 0, status="failed", error="mock regen failed", user_id=user["id"])
         raise HTTPException(503, "Mock video regen failed")
     new_url = random.choice(MOCK_VIDEO_URLS)
     await db.segments.update_one(
         {"id": segment_id},
         {"$set": {"video_url": new_url, "status": "pending"}},
     )
-    await log_generation("video_segment", seg.get("project_id"), COSTS["video_segment"])
+    await log_generation("video_segment", seg.get("project_id"), COSTS["video_segment"], user_id=user["id"])
     return await db.segments.find_one({"id": segment_id}, {"_id": 0})
 
 
 @api.post("/scenes/{scene_id}/reduce-to-draft")
-async def reduce_scene_to_draft(scene_id: str):
+async def reduce_scene_to_draft(scene_id: str, user: dict = Depends(current_user)):
     """Drop the scene's planned segments to 1 by deleting all video segments
     except the earliest one. Idempotent: a scene with 0 or 1 segment is a no-op.
     Returns the saved credits and the new segment list."""
-    scene = await db.scenes.find_one({"id": scene_id}, {"_id": 0})
-    if not scene:
-        raise HTTPException(404, "Scene not found")
+    scene = await _owned_scene(scene_id, user)
 
     segs = await db.segments.find(
         {"scene_id": scene_id}, {"_id": 0}
@@ -1655,7 +1783,8 @@ async def reduce_scene_to_draft(scene_id: str):
 
 
 @api.delete("/segments/{segment_id}")
-async def delete_segment(segment_id: str):
+async def delete_segment(segment_id: str, user: dict = Depends(current_user)):
+    await _owned_segment(segment_id, user)
     await db.segments.delete_one({"id": segment_id})
     return {"ok": True}
 
@@ -1676,7 +1805,8 @@ async def cost_estimate(body: CostEstimateRequest):
 
 
 @api.get("/projects/{project_id}/cost-estimate")
-async def project_cost_estimate(project_id: str):
+async def project_cost_estimate(project_id: str, user: dict = Depends(current_user)):
+    await _owned_project(project_id, user)
     scenes = await db.scenes.find({"project_id": project_id}, {"_id": 0}).to_list(500)
     n_scenes = len(scenes)
     ops = {
@@ -1694,10 +1824,8 @@ async def project_cost_estimate(project_id: str):
 # Final export (mock stitch)
 # ---------------------------------------------------------------------------
 @api.get("/projects/{project_id}/export")
-async def export_project(project_id: str):
-    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
-    if not proj:
-        raise HTTPException(404, "Project not found")
+async def export_project(project_id: str, user: dict = Depends(current_user)):
+    proj = await _owned_project(project_id, user)
     scenes = await db.scenes.find({"project_id": project_id}, {"_id": 0}).sort("order", 1).to_list(500)
     approved = []
     total_seconds = 0

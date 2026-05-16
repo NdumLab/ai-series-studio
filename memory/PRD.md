@@ -6,12 +6,15 @@ Build a full-stack web MVP called AI Episode Studio that helps creators generate
 ## Architecture
 - Backend: FastAPI + MongoDB (relational-style schemas), all routes under `/api`
 - Frontend: React (CRA + craco) + Tailwind + shadcn/ui, dark cinematic theme (Outfit + IBM Plex Sans), red accent #FF3B30
-- No auth — single demo user `user-demo` seeded on startup
+- MVP auth is implemented: email/password beta accounts, bearer sessions, and
+  per-user project ownership. `AUTH_DEMO_MODE=true` preserves the seeded
+  no-token `user-demo` workflow for local demos/tests.
 - Provider architecture exists under `backend/providers/`; LLM is real-capable behind `USE_REAL_LLM_PROVIDER`, while image/video/voice/music/export remain mock-only by construction.
 - Mock generators return curated static URLs (Unsplash + Google sample mp4s) and log every generation/provider activity.
 
 ## Data Models (MongoDB collections)
-- users: id, name, email, role, credits, created_at
+- users: id, name, email, role, credits, optional password hash/salt, created_at
+- user_sessions: id, token, user_id, created_at
 - projects: id, user_id, title, idea, rewritten_story, status, provider override fields, optional soft-delete fields (`deleted_at`, `deleted_by`, `delete_expires_at`, `previous_status`), quality_scores, created_at, updated_at
 - characters: id, project_id, order, name, description, voice_style, voice_provider, voice_model, reference_image_url
 - scenes: id, project_id, order, title, duration, location, characters[], visual_prompt, raw/enhanced prompts, dialogue, music_mood, camera_direction, tension fields, voice, image_url, status
@@ -33,6 +36,7 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 - Admin console: stats + users/projects/generations/failed jobs/provider activity/provider health/recently deleted tables
 - Provider settings + per-project provider overrides; real LLM is gated and available for text operations, non-LLM modalities remain mock-only.
 - Scene reorder, segment reorder, and character reorder are implemented.
+- MVP auth and project ownership are implemented with local demo compatibility.
 - Current backend suite has grown substantially since the MVP baseline; see later iteration notes for exact counts.
 
 ## P1 Completed
@@ -46,24 +50,23 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 - Current MVP status: mock-first workflow is mature; real LLM is gated and
   available for text operations; image/video/voice/music/export remain
   mock-only.
-- 100% MVP requires auth/ownership, credit guardrails, real image generation,
-  real video segments, real voice/music or upload fallback, real FFmpeg export,
-  durable object storage, deployment, and end-to-end real media validation.
+- 100% MVP still requires credit guardrails, real image generation, real video
+  segments, real voice/music or upload fallback, real FFmpeg export, durable
+  object storage, deployment, and end-to-end real media validation.
 - Recommended build order:
-  1. Auth and ownership.
-  2. Credit wallet and cost guardrails.
-  3. Real image provider.
-  4. Real video provider.
-  5. Real voice/music.
-  6. Real export.
-  7. Private beta.
+  1. Credit wallet and cost guardrails.
+  2. Real image provider.
+  3. Real video provider.
+  4. Real voice/music.
+  5. Real export.
+  6. Private beta.
 - Launch-ready criteria include working auth, credits, real LLM, real image,
   real video, MP4 export, storage, cost limits, admin monitoring, full passing
   tests, three successful sample episodes, and understood internal cost per
   1-minute video.
 
 ## Backlog (P2)
-- Auth.
+- Credit wallet and cost guardrails.
 - Stripe metering.
 - Real Image provider.
 - Real Video provider.
@@ -73,6 +76,23 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 - Public sharing.
 - Multi-tenant teams.
 - Versioned scene revisions.
+
+## Iteration 25 (2026-05) — MVP auth and ownership
+- Added local email/password auth endpoints:
+  - POST /api/auth/register
+  - POST /api/auth/login
+  - POST /api/auth/logout
+  - GET /api/me returns the current public user.
+- Added bearer session tokens stored server-side in `user_sessions`.
+- Project list/create/detail/update/delete/restore plus project-scoped
+  character, scene, segment, provider, export, and generation routes are scoped
+  to the authenticated user.
+- Preserved local demo compatibility: when `AUTH_DEMO_MODE=true` and no bearer
+  token is sent, requests use the seeded `user-demo` account.
+- Frontend now has a private beta login/register page and stores the bearer
+  token in local storage for API requests.
+- No Stripe, paid provider calls, API key inputs, or real image/video/voice/
+  music/export providers were added.
 
 ## Iteration 2 (2026-02) — Workflow & Segment Model
 - Added persistent "Mock Mode: No real AI APIs connected yet" badge in top nav.

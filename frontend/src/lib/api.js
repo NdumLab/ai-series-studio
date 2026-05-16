@@ -2,8 +2,29 @@ import axios from "axios";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
+const TOKEN_KEY = "ai_episode_studio_token";
 
 export const api = axios.create({ baseURL: API });
+
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+export const session = {
+  getToken: () => localStorage.getItem(TOKEN_KEY),
+  setToken: (token) => localStorage.setItem(TOKEN_KEY, token),
+  clear: () => localStorage.removeItem(TOKEN_KEY),
+};
+
+export const Auth = {
+  register: (payload) => api.post("/auth/register", payload).then((r) => r.data),
+  login: (payload) => api.post("/auth/login", payload).then((r) => r.data),
+  logout: () => api.post("/auth/logout").then((r) => r.data),
+};
 
 export const Projects = {
   list: () => api.get("/projects").then((r) => r.data),

@@ -21,6 +21,9 @@ cost controls, testing strategy, launch criteria, and post-MVP scope.
 
 - Story, scene, character, image, video segment, voice/music, provider, and
   export workflows are implemented for the mock-first studio.
+- MVP auth is implemented with local email/password beta accounts, bearer
+  sessions, and per-user project ownership. Requests without a token still use
+  `user-demo` when `AUTH_DEMO_MODE=true` for local demo compatibility.
 - Characters support an `order` field and drag handles in the Cast /
   Characters view.
 - Scene, segment, and character reorder are implemented with optimistic
@@ -65,6 +68,28 @@ PUT /api/scenes/{scene_id}/segments/reorder
 
 Each reorder endpoint validates ownership, rejects foreign or partial ID lists,
 updates `order` based on list position, and returns the reordered records.
+
+## Auth And Ownership
+
+Local/demo mode is enabled by default. With no `Authorization` header, the API
+uses the seeded `user-demo` account so existing local tests and demos keep
+working. Real beta accounts can register or sign in:
+
+```http
+POST /api/auth/register
+POST /api/auth/login
+POST /api/auth/logout
+GET /api/me
+```
+
+Authenticated requests use `Authorization: Bearer <token>`. Project listing,
+project detail/mutation, character, scene, segment, export, and provider
+project views are scoped to the current user. To require auth for every request
+in a non-demo environment, set:
+
+```bash
+AUTH_DEMO_MODE=false
+```
 
 ## Prerequisites
 
@@ -190,7 +215,7 @@ Provider-layer unit tests can run without a running backend:
 ```bash
 cd backend
 source .venv/bin/activate
-python -m pytest tests/test_provider_layer.py tests/test_phase2b_llm.py
+python -m pytest tests/test_provider_layer.py tests/test_phase2b_llm.py tests/test_auth_helpers.py
 ```
 
 ## Frontend Lint And Build

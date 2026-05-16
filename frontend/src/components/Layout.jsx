@@ -1,5 +1,7 @@
-import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
-import { Film, LayoutDashboard, ShieldCheck, Settings as SettingsIcon } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Film, LayoutDashboard, LogIn, ShieldCheck, Settings as SettingsIcon } from "lucide-react";
+import { Auth, Meta, session } from "../lib/api";
 
 const navItem =
   "px-3 py-1.5 rounded-md text-sm font-medium tracking-tight transition-colors";
@@ -8,6 +10,25 @@ const inactiveNav = "text-[#A1A1AA] hover:text-white hover:bg-white/5";
 
 export default function Layout() {
   const { pathname } = useLocation();
+  const navigate = useNavigate();
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    Meta.me()
+      .then(setUser)
+      .catch(() => setUser(null));
+  }, [pathname]);
+
+  const logout = async () => {
+    try {
+      await Auth.logout();
+    } finally {
+      session.clear();
+      setUser(null);
+      navigate("/login");
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-[#050505] text-[#F5F5F5]">
       <header
@@ -67,6 +88,27 @@ export default function Layout() {
                 </span>
               </NavLink>
             </nav>
+            {user ? (
+              <button
+                type="button"
+                onClick={logout}
+                className="hidden md:inline-flex items-center gap-2 px-2.5 py-1 rounded-md border border-white/10 text-[11px] text-[#A1A1AA] hover:text-white hover:bg-white/5"
+                title="Sign out"
+              >
+                <span className="max-w-[120px] truncate">{user.name || user.email}</span>
+              </button>
+            ) : (
+              <NavLink
+                to="/login"
+                className={({ isActive }) =>
+                  `${navItem} ${isActive ? activeNav : inactiveNav}`
+                }
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <LogIn className="w-3.5 h-3.5" /> Login
+                </span>
+              </NavLink>
+            )}
           </div>
         </div>
       </header>
