@@ -122,6 +122,7 @@ def test_character_crud(s, project_id):
     assert r.status_code == 200
     cid = r.json()["id"]
     assert r.json()["reference_image_url"]
+    assert isinstance(r.json()["order"], int)
 
     r2 = s.put(f"{API}/characters/{cid}", json={"description": "brave"})
     assert r2.status_code == 200
@@ -129,6 +130,74 @@ def test_character_crud(s, project_id):
 
     r3 = s.delete(f"{API}/characters/{cid}")
     assert r3.status_code == 200
+
+
+def test_character_order_field_default_behavior(s):
+    p = s.post(f"{API}/projects", json={"title": "TEST_CharOrder", "idea": "x"}).json()
+    pid = p["id"]
+    try:
+        c1 = s.post(f"{API}/projects/{pid}/characters", json={"name": "A"}).json()
+        time.sleep(0.01)
+        c2 = s.post(f"{API}/projects/{pid}/characters", json={"name": "B"}).json()
+        assert c1["order"] == 0
+        assert c2["order"] == 1
+
+        # Simulate legacy rows from before Character.order existed.
+        db = _direct_db()
+        db.characters.update_many({"project_id": pid}, {"$unset": {"order": ""}})
+
+        d = s.get(f"{API}/projects/{pid}").json()
+        chars = d["characters"]
+        assert [c["id"] for c in chars] == [c1["id"], c2["id"]]
+        assert [c["order"] for c in chars] == [0, 1]
+    finally:
+        s.delete(f"{API}/projects/{pid}")
+
+
+def test_character_reorder_success_and_persist(s):
+    p = s.post(f"{API}/projects", json={"title": "TEST_CharReorder", "idea": "x"}).json()
+    pid = p["id"]
+    try:
+        chars = [
+            s.post(f"{API}/projects/{pid}/characters", json={"name": f"Char {i}"}).json()
+            for i in range(3)
+        ]
+        new_ids = [chars[2]["id"], chars[0]["id"], chars[1]["id"]]
+        r = s.put(f"{API}/projects/{pid}/characters/reorder", json={"character_ids": new_ids})
+        assert r.status_code == 200, r.text
+        reordered = r.json()["characters"]
+        assert [c["id"] for c in reordered] == new_ids
+        assert [c["order"] for c in reordered] == [0, 1, 2]
+
+        refreshed = s.get(f"{API}/projects/{pid}").json()["characters"]
+        assert [c["id"] for c in refreshed] == new_ids
+        assert [c["order"] for c in refreshed] == [0, 1, 2]
+    finally:
+        s.delete(f"{API}/projects/{pid}")
+
+
+def test_character_reorder_rejects_foreign_or_partial(s):
+    p1 = s.post(f"{API}/projects", json={"title": "TEST_CharReorderA", "idea": "x"}).json()
+    p2 = s.post(f"{API}/projects", json={"title": "TEST_CharReorderB", "idea": "x"}).json()
+    try:
+        a1 = s.post(f"{API}/projects/{p1['id']}/characters", json={"name": "A1"}).json()
+        a2 = s.post(f"{API}/projects/{p1['id']}/characters", json={"name": "A2"}).json()
+        b1 = s.post(f"{API}/projects/{p2['id']}/characters", json={"name": "B1"}).json()
+
+        foreign = s.put(
+            f"{API}/projects/{p1['id']}/characters/reorder",
+            json={"character_ids": [a1["id"], b1["id"]]},
+        )
+        assert foreign.status_code == 400
+
+        partial = s.put(
+            f"{API}/projects/{p1['id']}/characters/reorder",
+            json={"character_ids": [a2["id"]]},
+        )
+        assert partial.status_code == 400
+    finally:
+        s.delete(f"{API}/projects/{p1['id']}")
+        s.delete(f"{API}/projects/{p2['id']}")
 
 
 # ---------- Scenes & segments ----------

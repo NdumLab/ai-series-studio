@@ -13,7 +13,7 @@ Build a full-stack web MVP called AI Episode Studio that helps creators generate
 ## Data Models (MongoDB collections)
 - users: id, name, email, role, credits, created_at
 - projects: id, user_id, title, idea, rewritten_story, status, provider override fields, optional soft-delete fields (`deleted_at`, `deleted_by`, `delete_expires_at`, `previous_status`), quality_scores, created_at, updated_at
-- characters: id, project_id, name, description, voice_style, voice_provider, voice_model, reference_image_url
+- characters: id, project_id, order, name, description, voice_style, voice_provider, voice_model, reference_image_url
 - scenes: id, project_id, order, title, duration, location, characters[], visual_prompt, raw/enhanced prompts, dialogue, music_mood, camera_direction, tension fields, voice, image_url, status
 - segments: id, scene_id, project_id, order, parent_segment_id, start_second, expand_mode, continuity_prompt, video_url, duration, status (pending/approved/rejected)
 - generations: id, user_id, project_id, type, cost_credits, status, error, created_at
@@ -25,26 +25,33 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 ## Implemented (2026-02)
 - Projects CRUD, soft delete, restore, 24h purge scheduler, rewrite, split-into-6-scenes
 - Scene CRUD with full field set (incl. dialogue, music_mood, camera_direction, voice, characters tags)
-- Character CRUD with placeholder portrait
+- Character CRUD with placeholder portrait, per-character voice override, `order` field, and drag handles in the Cast view.
 - Mock image generation (curated URL pool, 5% mock failure to populate admin failed jobs)
 - Mock 5s video segment generation, "Expand next 5s", approve/reject/regenerate
 - Cost estimator (POST /api/cost-estimate + GET /api/projects/{id}/cost-estimate)
 - Final Export page with stitched preview (mock final video URL)
 - Admin console: stats + users/projects/generations/failed jobs/provider activity/provider health/recently deleted tables
 - Provider settings + per-project provider overrides; real LLM is gated and available for text operations, non-LLM modalities remain mock-only.
+- Scene reorder, segment reorder, and character reorder are implemented.
 - Current backend suite has grown substantially since the MVP baseline; see later iteration notes for exact counts.
 
-## Backlog (P1)
+## P1 Completed
 - Character drag handles in Cast view.
-- Real provider plug-ins for non-LLM modalities behind feature flags plus an at-rest secrets store: image (fal.ai / Gemini Nano Banana), video (Sora/Sora-like), voice (ElevenLabs / OpenAI TTS), music, FFmpeg/export worker.
-- API key inputs + storage remain locked until real-provider mode for those modalities is designed.
-- Authentication (Google login or JWT).
+- Safe delete / Undo delete.
+- Recently Deleted admin panel.
+- Background purge scheduler.
 
 ## Backlog (P2)
-- Public project sharing with watermark
-- Credit purchase + Stripe metering
-- Multi-tenant teams with role-based admin
-- Versioned scene revisions / undo
+- Auth.
+- Stripe metering.
+- Real Image provider.
+- Real Video provider.
+- Real Voice provider.
+- Real Music provider.
+- Real Export / FFmpeg worker.
+- Public sharing.
+- Multi-tenant teams.
+- Versioned scene revisions.
 
 ## Iteration 2 (2026-02) — Workflow & Segment Model
 - Added persistent "Mock Mode: No real AI APIs connected yet" badge in top nav.
@@ -226,7 +233,9 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 - Mock-only invariants preserved; no real provider wiring, no API key fields, no Stripe.
 
 ## Backlog (P1) — refreshed
-- Character drag handles in Cast view (deferred from iteration 12; requires `order` field on Character model + `PUT /api/projects/{id}/characters/reorder`).
+- Character drag handles in Cast view are implemented as of Iteration 24:
+  Character documents now carry `order`, the Cast view has drag handles, and
+  `PUT /api/projects/{id}/characters/reorder` persists ordering.
 - Safe delete / Undo / Restore / 24h purge is now implemented:
   `DELETE /api/projects/{id}` soft-deletes, `POST /api/projects/{id}/restore`
   restores, `POST /api/admin/purge-deleted-projects` purges expired records,
@@ -234,15 +243,20 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 - Provider architecture is now implemented, including provider resolution,
   provider activity logs, guard/status endpoints, and LLM-only real execution.
   Remaining provider backlog is limited to real non-LLM plug-ins.
-- Real provider plug-ins for non-LLM modalities behind feature flags + at-rest secrets store.
-- API key inputs + storage for non-LLM providers (locked until real-provider mode is activated).
+- P1 completed: character drag handles, safe delete / Undo delete, Recently
+  Deleted admin panel, background purge scheduler.
 
 ## Backlog (P2)
-- Stripe metering + real credit purchases (replaces 250-credit mock wallet).
-- Authentication (Google login or JWT).
-- Public project sharing with watermark.
-- Multi-tenant teams with role-based admin.
-- Versioned scene revisions / undo.
+- Auth.
+- Stripe metering.
+- Real Image provider.
+- Real Video provider.
+- Real Voice provider.
+- Real Music provider.
+- Real Export / FFmpeg worker.
+- Public sharing.
+- Multi-tenant teams.
+- Versioned scene revisions.
 
 
 ## Iteration 14 (2026-02) — Project cascade-delete with counts
@@ -583,6 +597,54 @@ Stopped before Phase 2B real-LLM wiring per user. The next milestone is the **Em
 - Frontend ESLint: clean.
 - Production build: OK (~191 kB gzip).
 - Admin "Recently Deleted" tab smoke-tested live (renders pre-existing 133 entries from prior test runs, count badge visible, columns + Restore buttons present, no console errors).
+
+
+## Iteration 24 (2026-05) — Character drag handles in Cast view
+**Goal**: close the remaining P1 reorder gap by matching scene and segment
+drag behavior for characters.
+
+### Backend
+- Character documents now support `order`.
+- Existing/legacy characters without `order` are backfilled based on current
+  chronological order (`created_at`, then id) whenever project characters are
+  read.
+- New endpoint:
+  ```http
+  PUT /api/projects/{project_id}/characters/reorder
+  ```
+  Payload:
+  ```json
+  { "character_ids": ["char1", "char2", "char3"] }
+  ```
+- The endpoint validates that the list includes every character for the
+  project exactly once, rejects foreign/partial lists, updates `order` from
+  list position, and returns characters sorted by `order`.
+
+### Frontend
+- CharactersTab / Cast view now renders character cards inside the shared
+  `SortableList`.
+- Each character card has a drag handle.
+- Reorder is optimistic: the UI updates immediately, calls the reorder API,
+  keeps the order on success, and restores the previous order with a toast on
+  failure.
+- Edit and delete actions remain independent of the drag handle.
+
+### Current reorder status
+- Scene reorder: implemented.
+- Segment reorder: implemented.
+- Character reorder: implemented.
+
+### Current delete/provider status
+- Soft delete / restore / Recently Deleted / purge are implemented.
+- Real LLM is gated behind `USE_REAL_LLM_PROVIDER`.
+- Image / Video / Voice / Music / Export providers remain mock-only.
+
+### Backlog after Iteration 24
+- P1 completed: Character drag handles in Cast view; Safe delete / Undo delete;
+  Recently Deleted admin panel; Background purge scheduler.
+- P2 remaining: Auth; Stripe metering; Real Image provider; Real Video
+  provider; Real Voice provider; Real Music provider; Real Export / FFmpeg
+  worker; Public sharing; Multi-tenant teams; Versioned scene revisions.
 
 
 ## Iteration 21 (2026-02) — Phase 2B: Real LLM provider (LLM modality only)

@@ -10,6 +10,55 @@ The app is intentionally mock-first. Provider selection and provider activity
 plumbing exist, and real LLM execution is gated behind server-side flags and
 keys. Image, video, voice, music, and export providers remain mock-only.
 
+## Current Product State
+
+- Story, scene, character, image, video segment, voice/music, provider, and
+  export workflows are implemented for the mock-first studio.
+- Characters support an `order` field and drag handles in the Cast /
+  Characters view.
+- Scene, segment, and character reorder are implemented with optimistic
+  drag-and-drop in the frontend.
+- Soft delete, restore, Admin Recently Deleted, and expired-project purge are
+  implemented.
+- Real LLM support exists for text operations, gated behind
+  `USE_REAL_LLM_PROVIDER`.
+- Image, video, voice, music, and export providers remain mock-only.
+
+## Reorder Endpoints
+
+Scenes:
+
+```http
+PUT /api/projects/{project_id}/scenes/reorder
+```
+
+```json
+{ "scene_ids": ["scene1", "scene2", "scene3"] }
+```
+
+Characters:
+
+```http
+PUT /api/projects/{project_id}/characters/reorder
+```
+
+```json
+{ "character_ids": ["char1", "char2", "char3"] }
+```
+
+Segments:
+
+```http
+PUT /api/scenes/{scene_id}/segments/reorder
+```
+
+```json
+{ "segment_ids": ["segment1", "segment2", "segment3"] }
+```
+
+Each reorder endpoint validates ownership, rejects foreign or partial ID lists,
+updates `order` based on list position, and returns the reordered records.
+
 ## Prerequisites
 
 - Python 3.11+
@@ -172,6 +221,28 @@ REACT_APP_BACKEND_URL=http://localhost:8000 python -m pytest backend/tests/backe
   `USE_REAL_*_PROVIDER` flags are set.
 - Do not put real API keys in `.env.example`, README examples, or committed
   files.
+
+## Backlog
+
+P1 completed:
+
+- Character drag handles in Cast view.
+- Safe delete / Undo delete.
+- Recently Deleted admin panel.
+- Background purge scheduler.
+
+P2 remaining:
+
+- Auth.
+- Stripe metering.
+- Real Image provider.
+- Real Video provider.
+- Real Voice provider.
+- Real Music provider.
+- Real Export / FFmpeg worker.
+- Public sharing.
+- Multi-tenant teams.
+- Versioned scene revisions.
 
 ## Useful Paths
 

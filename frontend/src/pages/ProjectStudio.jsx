@@ -175,6 +175,7 @@ export default function ProjectStudio() {
             project={project}
             characters={characters}
             voices={options.voices}
+            setData={setData}
             reload={reloadAll}
           />
         </TabsContent>

@@ -28,6 +28,7 @@ export function SortableList({
   direction = "vertical",
   renderItem,
   testId,
+  className = "",
 }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
@@ -46,7 +47,7 @@ export function SortableList({
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleEnd}>
       <SortableContext items={items.map((x) => getId(x))} strategy={strategy}>
-        <div data-testid={testId}>
+        <div data-testid={testId} className={className}>
           {items.map((item, i) => (
             <SortableRow
               key={getId(item)}

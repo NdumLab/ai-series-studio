@@ -21,9 +21,10 @@ import {
   DialogTrigger,
 } from "../../components/ui/dialog";
 import { VOICE_PROVIDER_OPTIONS } from "../../components/studio/constants";
+import { SortableList } from "../../components/SortableList";
 import { Characters } from "../../lib/api";
 
-export function CharactersTab({ project, characters, voices, reload }) {
+export function CharactersTab({ project, characters, voices, setData, reload }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({
@@ -242,12 +243,30 @@ export function CharactersTab({ project, characters, voices, reload }) {
       {characters.length === 0 ? (
         <div className="es-card p-12 text-center text-[#A1A1AA]">No characters yet.</div>
       ) : (
-        <div
+        <SortableList
+          items={characters}
+          getId={(c) => c.id}
+          direction="grid"
+          testId="characters-grid"
           className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
-          data-testid="characters-grid"
-        >
-          {characters.map((c) => (
-            <div key={c.id} className="es-card overflow-hidden" data-testid={`char-${c.id}`}>
+          onReorder={async (ids) => {
+            const byId = new Map(characters.map((c) => [c.id, c]));
+            const next = ids.map((id, i) => ({ ...byId.get(id), order: i }));
+            const prev = characters;
+            setData?.((d) => (d ? { ...d, characters: next } : d));
+            try {
+              await Characters.reorder(project.id, ids);
+              reload({ skipProject: true });
+            } catch {
+              setData?.((d) => (d ? { ...d, characters: prev } : d));
+              toast.error("Reorder failed — restored");
+            }
+          }}
+          renderItem={(c, handle) => (
+            <div className="es-card overflow-hidden relative" data-testid={`char-${c.id}`}>
+              <div className="absolute top-2 left-2 z-10 rounded-md bg-black/70 backdrop-blur border border-white/10">
+                {handle}
+              </div>
               <div className="aspect-[4/5] bg-black overflow-hidden">
                 <img
                   src={c.reference_image_url}
@@ -295,8 +314,8 @@ export function CharactersTab({ project, characters, voices, reload }) {
                 )}
               </div>
             </div>
-          ))}
-        </div>
+          )}
+        />
       )}
     </div>
   );

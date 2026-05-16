@@ -24,6 +24,10 @@ export const Characters = {
     api.post(`/projects/${projectId}/characters`, payload).then((r) => r.data),
   update: (id, payload) => api.put(`/characters/${id}`, payload).then((r) => r.data),
   remove: (id) => api.delete(`/characters/${id}`).then((r) => r.data),
+  reorder: (projectId, characterIds) =>
+    api
+      .put(`/projects/${projectId}/characters/reorder`, { character_ids: characterIds })
+      .then((r) => r.data),
 };
 
 export const Scenes = {

@@ -436,6 +436,10 @@ class ReorderSegmentsBody(BaseModel):
     segment_ids: List[str]
 
 
+class ReorderCharactersBody(BaseModel):
+    character_ids: List[str]
+
+
 class SegmentCreate(BaseModel):
     continuity_prompt: Optional[str] = None
 
@@ -699,9 +703,7 @@ async def project_voice_resolution(project_id: str):
         "model": effective["voice"]["model"],
         "source": effective["voice"]["source"],  # "global" | "global-fallback" | "project"
     }
-    chars = await db.characters.find(
-        {"project_id": project_id}, {"_id": 0}
-    ).to_list(500)
+    chars = await _ordered_characters(project_id)
     out_chars = []
     for c in chars:
         cv_provider = (c.get("voice_provider") or "").strip()
@@ -876,6 +878,38 @@ async def _project_cost_summary(project_id: str, cfg: dict) -> dict:
     }
 
 
+async def _ordered_characters(project_id: str) -> List[dict]:
+    """Return project characters sorted by order and backfill missing order.
+
+    Legacy characters may not have `order`. For those, preserve the current
+    natural chronology by created_at/id and assign sequential order values.
+    """
+    chars = await db.characters.find(
+        {"project_id": project_id}, {"_id": 0}
+    ).to_list(500)
+
+    def _sort_key(c: dict):
+        order = c.get("order")
+        has_order = isinstance(order, int)
+        return (
+            0 if has_order else 1,
+            order if has_order else 0,
+            c.get("created_at", ""),
+            c.get("id", ""),
+        )
+
+    chars = sorted(chars, key=_sort_key)
+    needs_backfill = any(c.get("order") != i for i, c in enumerate(chars))
+    if needs_backfill:
+        for i, c in enumerate(chars):
+            c["order"] = i
+            await db.characters.update_one(
+                {"id": c["id"], "project_id": project_id},
+                {"$set": {"order": i}},
+            )
+    return chars
+
+
 # Soft-delete helpers
 SOFT_DELETE_TTL_HOURS = 24
 
@@ -908,7 +942,7 @@ async def get_project(project_id: str, include_deleted: bool = False):
     if not proj:
         raise HTTPException(404, "Project not found")
     scenes = await db.scenes.find({"project_id": project_id}, {"_id": 0}).sort("order", 1).to_list(500)
-    characters = await db.characters.find({"project_id": project_id}, {"_id": 0}).to_list(500)
+    characters = await _ordered_characters(project_id)
     # attach segments to each scene
     for s in scenes:
         s["segments"] = await db.segments.find({"scene_id": s["id"]}, {"_id": 0}).sort("order", 1).to_list(50)
@@ -1272,9 +1306,15 @@ async def creative_enhancement_hints():
 # ---------------------------------------------------------------------------
 @api.post("/projects/{project_id}/characters")
 async def create_character(project_id: str, body: CharacterCreate):
+    project = await db.projects.find_one({"id": project_id}, {"_id": 0, "id": 1})
+    if not project:
+        raise HTTPException(404, "Project not found")
+    await _ordered_characters(project_id)
+    order = await db.characters.count_documents({"project_id": project_id})
     doc = {
         "id": new_id(),
         "project_id": project_id,
+        "order": order,
         "name": body.name,
         "description": body.description,
         "voice_style": body.voice_style,
@@ -1305,8 +1345,32 @@ async def update_character(character_id: str, body: CharacterUpdate):
 
 @api.delete("/characters/{character_id}")
 async def delete_character(character_id: str):
+    char = await db.characters.find_one({"id": character_id}, {"_id": 0})
     await db.characters.delete_one({"id": character_id})
+    if char:
+        await _ordered_characters(char["project_id"])
     return {"ok": True}
+
+
+@api.put("/projects/{project_id}/characters/reorder")
+async def reorder_characters(project_id: str, body: ReorderCharactersBody):
+    project = await db.projects.find_one({"id": project_id}, {"_id": 0, "id": 1})
+    if not project:
+        raise HTTPException(404, "Project not found")
+    existing = await _ordered_characters(project_id)
+    existing_ids = {c["id"] for c in existing}
+    incoming = list(body.character_ids)
+    if len(incoming) != len(existing_ids) or set(incoming) != existing_ids:
+        raise HTTPException(
+            400,
+            "character_ids must include every character of this project exactly once",
+        )
+    for i, cid in enumerate(incoming):
+        await db.characters.update_one(
+            {"id": cid, "project_id": project_id},
+            {"$set": {"order": i}},
+        )
+    return {"characters": await _ordered_characters(project_id)}
 
 
 # ---------------------------------------------------------------------------
