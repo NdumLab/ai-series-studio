@@ -39,6 +39,8 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 - MVP auth and project ownership are implemented with local demo compatibility.
 - Per-user credit balances and insufficient-credit blocking are implemented for
   generation actions.
+- Stripe test-mode readiness status exists, but checkout/session creation and
+  webhook credit fulfillment are not implemented yet.
 - Current backend suite has grown substantially since the MVP baseline; see later iteration notes for exact counts.
 
 ## P1 Completed
@@ -52,9 +54,10 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 - Current MVP status: mock-first workflow is mature; real LLM is gated and
   available for text operations; image/video/voice/music/export remain
   mock-only.
-- 100% MVP still requires Stripe test metering, real image generation, real
-  video segments, real voice/music or upload fallback, real FFmpeg export,
-  durable object storage, deployment, and end-to-end real media validation.
+- 100% MVP still requires Stripe checkout/session creation and webhook credit
+  fulfillment, real image generation, real video segments, real voice/music or
+  upload fallback, real FFmpeg export, durable object storage, deployment, and
+  end-to-end real media validation.
 - Recommended build order:
   1. Stripe test metering.
   2. Real image provider.
@@ -68,7 +71,7 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
   1-minute video.
 
 ## Backlog (P2)
-- Stripe metering.
+- Stripe checkout/session creation and webhooks.
 - Real Image provider.
 - Real Video provider.
 - Real Voice provider.
@@ -108,6 +111,17 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
   remaining credit balance.
 - Stripe remains disabled and no paid provider calls or API key inputs were
   added.
+
+## Iteration 27 (2026-05) — Stripe test-mode readiness gate
+- Added `GET /api/billing/status`, a safe billing readiness endpoint that only
+  reports whether Stripe test-mode env vars are configured.
+- Added disabled-by-default billing env placeholders:
+  `STRIPE_TEST_MODE`, `STRIPE_SECRET_KEY`, `STRIPE_CREDIT_PRICE_ID`, and
+  `STRIPE_WEBHOOK_SECRET`.
+- Added Settings-page visibility for Stripe test metering status.
+- Added side-effect-free billing config tests.
+- No checkout sessions, webhooks, live payments, real charges, or Stripe
+  network calls were added.
 
 ## Iteration 2 (2026-02) — Workflow & Segment Model
 - Added persistent "Mock Mode: No real AI APIs connected yet" badge in top nav.

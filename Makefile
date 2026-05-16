@@ -7,7 +7,7 @@ export REACT_APP_BACKEND_URL
 .PHONY: backend-test backend-http-test frontend-lint frontend-build dev-check
 
 backend-test:
-	$(PYTHON) -m pytest backend/tests/test_provider_layer.py backend/tests/test_phase2b_llm.py backend/tests/test_auth_helpers.py backend/tests/test_credit_utils.py
+	$(PYTHON) -m pytest backend/tests/test_provider_layer.py backend/tests/test_phase2b_llm.py backend/tests/test_auth_helpers.py backend/tests/test_credit_utils.py backend/tests/test_billing_utils.py
 
 backend-http-test:
 	$(PYTHON) -m pytest backend/tests/backend_test.py

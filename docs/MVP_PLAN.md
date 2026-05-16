@@ -39,6 +39,8 @@ Completed today:
 - Cost tracking: operation costs, project/scene estimates, wallet ring,
   high-cost scene warnings, trend deltas, reduce-to-draft, per-user credit
   balances, and insufficient-credit blocking for generation actions.
+- Billing readiness: Stripe test-mode status plumbing exists and remains
+  disabled until safe test env vars are configured.
 - Admin monitoring: stats, users, projects, generations, failed jobs, provider
   activity, provider health, and Recently Deleted.
 - Soft delete/restore: dashboard undo, restore endpoint, Admin Recently
@@ -82,6 +84,7 @@ Completed:
 - [x] Local setup docs.
 - [x] Basic auth and project ownership.
 - [x] Basic credit wallet and generation guardrails.
+- [x] Stripe test-mode readiness gate.
 
 Remaining:
 
@@ -91,7 +94,7 @@ Remaining:
 - [ ] Real music/SFX provider.
 - [ ] Real FFmpeg export worker.
 - [ ] S3/R2 storage.
-- [ ] Stripe test metering.
+- [ ] Stripe checkout/session creation and webhook credit fulfillment.
 - [ ] Production deployment.
 - [ ] Basic rate limiting.
 - [ ] End-to-end real media test.
@@ -114,9 +117,10 @@ Remaining:
 
 ### Phase 3: Stripe test metering
 
-- Add Stripe test integration.
-- Keep test mode only.
-- Do not enable live payments.
+- Completed: add disabled-by-default Stripe test-mode status gate.
+- Remaining: add checkout/session creation in test mode.
+- Remaining: add webhook credit fulfillment.
+- Live payments remain disabled.
 
 ### Phase 4: Real image provider
 

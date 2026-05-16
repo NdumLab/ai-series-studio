@@ -63,6 +63,7 @@ from auth_utils import (  # noqa: E402
     public_user,
     verify_password,
 )
+from billing_utils import stripe_test_config  # noqa: E402
 from credit_utils import wallet_pct, wallet_state  # noqa: E402
 
 
@@ -737,6 +738,17 @@ async def providers_status_endpoint(
 async def get_studio_config():
     """Tunable thresholds (wallet credits, high-cost-scene threshold)."""
     return {**studio_config(), "mock_mode": True}
+
+
+@api.get("/billing/status")
+async def billing_status():
+    """Safe billing readiness snapshot.
+
+    This does not create customers, checkout sessions, subscriptions, or any
+    Stripe network call. It only reports whether local test-mode env vars are
+    present and safe to use later.
+    """
+    return stripe_test_config()
 
 
 # ---------------------------------------------------------------------------

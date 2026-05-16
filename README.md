@@ -95,6 +95,26 @@ in a non-demo environment, set:
 AUTH_DEMO_MODE=false
 ```
 
+## Billing Status
+
+Stripe is scaffolded for test-mode readiness only. The app does not create
+checkout sessions, charge cards, or enable live payments yet.
+
+```http
+GET /api/billing/status
+```
+
+The status endpoint reports whether safe test-mode env vars are configured
+without returning secret values. Leave billing disabled locally unless you are
+explicitly testing Stripe:
+
+```bash
+STRIPE_TEST_MODE=false
+STRIPE_SECRET_KEY=
+STRIPE_CREDIT_PRICE_ID=
+STRIPE_WEBHOOK_SECRET=
+```
+
 ## Prerequisites
 
 - Python 3.11+
@@ -219,7 +239,7 @@ Provider-layer unit tests can run without a running backend:
 ```bash
 cd backend
 source .venv/bin/activate
-python -m pytest tests/test_provider_layer.py tests/test_phase2b_llm.py tests/test_auth_helpers.py tests/test_credit_utils.py
+python -m pytest tests/test_provider_layer.py tests/test_phase2b_llm.py tests/test_auth_helpers.py tests/test_credit_utils.py tests/test_billing_utils.py
 ```
 
 ## Frontend Lint And Build
@@ -270,7 +290,7 @@ P1 completed:
 P2 remaining:
 
 - Auth.
-- Stripe metering.
+- Stripe checkout/session creation and webhooks.
 - Real Image provider.
 - Real Video provider.
 - Real Voice provider.

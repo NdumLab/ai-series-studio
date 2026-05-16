@@ -103,6 +103,10 @@ export const FeatureFlags = {
   get: () => api.get("/feature-flags").then((r) => r.data),
 };
 
+export const Billing = {
+  status: () => api.get("/billing/status").then((r) => r.data),
+};
+
 export const Creative = {
   hints: () => api.get("/creative/enhancement-hints").then((r) => r.data),
   recomputeScore: (projectId) =>

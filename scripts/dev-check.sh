@@ -3,7 +3,7 @@ set -euo pipefail
 
 PYTHON_BIN="${PYTHON:-backend/.venv/bin/python}"
 
-"${PYTHON_BIN}" -m pytest backend/tests/test_provider_layer.py backend/tests/test_phase2b_llm.py backend/tests/test_auth_helpers.py backend/tests/test_credit_utils.py
+"${PYTHON_BIN}" -m pytest backend/tests/test_provider_layer.py backend/tests/test_phase2b_llm.py backend/tests/test_auth_helpers.py backend/tests/test_credit_utils.py backend/tests/test_billing_utils.py
 
 (
   cd frontend

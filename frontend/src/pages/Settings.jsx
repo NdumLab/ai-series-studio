@@ -11,6 +11,7 @@ import {
   Save,
   PlugZap,
   ShieldAlert,
+  CreditCard,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -21,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../components/ui/select";
-import { ProviderSettings } from "../lib/api";
+import { Billing, ProviderSettings } from "../lib/api";
 
 const SECTIONS = [
   {
@@ -65,13 +66,19 @@ const SECTIONS = [
 export default function Settings() {
   const [catalog, setCatalog] = useState(null);
   const [settings, setSettings] = useState(null);
+  const [billing, setBilling] = useState(null);
   const [draft, setDraft] = useState({});
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    Promise.all([ProviderSettings.options(), ProviderSettings.get()]).then(([opt, s]) => {
+    Promise.all([
+      ProviderSettings.options(),
+      ProviderSettings.get(),
+      Billing.status(),
+    ]).then(([opt, s, b]) => {
       setCatalog(opt.catalog);
       setSettings(s);
+      setBilling(b);
       const d = {};
       for (const k of SECTIONS.map((x) => x.key)) d[k] = { ...s[k] };
       setDraft(d);
@@ -151,6 +158,7 @@ export default function Settings() {
 
       <MockBanner />
       <KeysBanner />
+      {billing && <BillingBanner billing={billing} />}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6" data-testid="provider-grid">
         {SECTIONS.map((sec) => (
@@ -163,6 +171,26 @@ export default function Settings() {
             onTest={() => test(sec.key)}
           />
         ))}
+      </div>
+    </div>
+  );
+}
+
+function BillingBanner({ billing }) {
+  return (
+    <div
+      data-testid="billing-status-banner"
+      className="es-card p-4 flex items-start gap-3 mt-3 border-white/10"
+    >
+      <CreditCard className="w-5 h-5 text-[#A1A1AA] mt-0.5" />
+      <div>
+        <p className="text-sm font-semibold text-white">
+          Stripe test metering {billing.enabled ? "configured" : "disabled"}
+        </p>
+        <p className="text-xs text-[#A1A1AA] mt-1">
+          {billing.message} Live payments are disabled; only server-side test-mode
+          environment variables are recognized.
+        </p>
       </div>
     </div>
   );
