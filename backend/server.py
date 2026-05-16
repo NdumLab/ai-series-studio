@@ -107,11 +107,24 @@ DEFAULT_USER = {
 # staging/beta to require JWT auth for user-owned resources.
 AUTH_ENABLED = os.environ.get("AUTH_ENABLED", "false").strip().lower() == "true"
 AUTH_DEMO_MODE = os.environ.get("AUTH_DEMO_MODE", "true").strip().lower() != "false"
-AUTH_JWT_SECRET = os.environ.get("AUTH_JWT_SECRET", "local-dev-auth-secret-change-me")
+JWT_SECRET_KEY = (
+    os.environ.get("JWT_SECRET_KEY")
+    or os.environ.get("AUTH_JWT_SECRET")
+    or "local-dev-auth-secret-change-me"
+)
+JWT_ALGORITHM = os.environ.get("JWT_ALGORITHM", "HS256").strip() or "HS256"
 try:
-    AUTH_TOKEN_EXPIRES_MINUTES = int(os.environ.get("AUTH_TOKEN_EXPIRES_MINUTES", "1440"))
+    JWT_EXPIRE_MINUTES = int(
+        os.environ.get("JWT_EXPIRE_MINUTES")
+        or os.environ.get("AUTH_TOKEN_EXPIRES_MINUTES")
+        or "1440"
+    )
 except (TypeError, ValueError):
-    AUTH_TOKEN_EXPIRES_MINUTES = 1440
+    JWT_EXPIRE_MINUTES = 1440
+try:
+    PASSWORD_MIN_LENGTH = int(os.environ.get("PASSWORD_MIN_LENGTH", "8"))
+except (TypeError, ValueError):
+    PASSWORD_MIN_LENGTH = 8
 
 MOCK_SCENE_IMAGES = [
     "https://static.prod-images.emergentagent.com/jobs/79e2f754-43ce-44a2-9d11-60523bb0d255/images/623d1bffe45150b2f2ede70157aed5fe723bbd8f51fa49c37a6ca79970a2b82c.png",
@@ -390,8 +403,9 @@ async def ensure_default_user() -> None:
 def _create_access_token(user_id: str) -> str:
     return create_access_token(
         user_id=user_id,
-        secret=AUTH_JWT_SECRET,
-        expires_in_seconds=AUTH_TOKEN_EXPIRES_MINUTES * 60,
+        secret=JWT_SECRET_KEY,
+        expires_in_seconds=JWT_EXPIRE_MINUTES * 60,
+        algorithm=JWT_ALGORITHM,
     )
 
 
@@ -400,7 +414,7 @@ async def current_user(authorization: Optional[str] = Header(None)) -> dict:
     token = bearer_token(authorization)
     if token:
         try:
-            payload = decode_access_token(token, AUTH_JWT_SECRET)
+            payload = decode_access_token(token, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
         except ValueError:
             raise HTTPException(401, "Invalid or expired session")
         user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
@@ -708,8 +722,8 @@ async def auth_register(body: AuthRegister):
         raise HTTPException(400, "Name is required")
     if "@" not in email:
         raise HTTPException(400, "Valid email is required")
-    if len(password) < 8:
-        raise HTTPException(400, "Password must be at least 8 characters")
+    if len(password) < PASSWORD_MIN_LENGTH:
+        raise HTTPException(400, f"Password must be at least {PASSWORD_MIN_LENGTH} characters")
     existing = await db.users.find_one({"email": email}, {"_id": 0})
     if existing:
         raise HTTPException(400, "Email is already registered")

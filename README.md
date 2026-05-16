@@ -96,8 +96,15 @@ in a non-demo environment, set:
 ```bash
 AUTH_ENABLED=true
 AUTH_DEMO_MODE=false
-AUTH_JWT_SECRET=replace-with-a-long-random-secret
+JWT_SECRET_KEY=replace-with-a-long-random-secret
+JWT_ALGORITHM=HS256
+JWT_EXPIRE_MINUTES=1440
+PASSWORD_MIN_LENGTH=8
 ```
+
+`AUTH_JWT_SECRET` and `AUTH_TOKEN_EXPIRES_MINUTES` are accepted only as
+backward-compatible aliases. New deployments should use the `JWT_*` names
+shown above. Never commit real JWT secrets.
 
 ## Billing Status
 

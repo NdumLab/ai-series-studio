@@ -24,7 +24,8 @@ Completed today:
   character `order`, and character drag handles/reorder.
 - Auth and ownership: local email/password beta accounts, JWT bearer access
   tokens, per-user project scoping, and `AUTH_ENABLED=false` /
-  `AUTH_DEMO_MODE=true` compatibility for no-token local demos.
+  `AUTH_DEMO_MODE=true` compatibility for no-token local demos. Production
+  auth envs and ownership/security tests are documented.
 - Reorder workflows: scenes, segments, and characters all support persisted
   ordering with optimistic frontend updates.
 - Creative Quality Engine: story scores, scene tension fields, improvement
@@ -91,7 +92,7 @@ Completed:
 
 Remaining:
 
-- [ ] Production auth/user ownership hardening before paid billing.
+- [x] Production auth/user ownership hardening before paid billing.
 - [ ] Stripe credit fulfillment tied to real users.
 - [ ] Real image provider.
 - [ ] Real video provider.
@@ -115,8 +116,8 @@ real Stripe checkout, webhook fulfillment, and paid provider work.
 - Completed: add login/register.
 - Completed: support real beta users while preserving `user-demo` local mode.
 - Completed: ensure projects belong to the authenticated user.
-- Next: production hardening plan is documented; implement it before real paid
-  checkout/webhook flows.
+- Completed: document production auth envs and add security coverage for
+  missing/invalid tokens, admin access, and cross-user ownership.
 
 ### Phase 2: Credit wallet and cost guardrails
 

@@ -21,6 +21,21 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const path = error?.config?.url || "";
+    if (
+      error?.response?.status === 401 &&
+      !path.includes("/auth/login") &&
+      !path.includes("/auth/register")
+    ) {
+      localStorage.removeItem(TOKEN_KEY);
+    }
+    return Promise.reject(error);
+  }
+);
+
 export const session = {
   getToken: () => localStorage.getItem(TOKEN_KEY),
   setToken: (token) => localStorage.setItem(TOKEN_KEY, token),

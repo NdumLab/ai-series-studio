@@ -54,9 +54,16 @@ def _b64url_decode(raw: str) -> bytes:
     return base64.urlsafe_b64decode((raw + padding).encode("ascii"))
 
 
-def create_access_token(user_id: str, secret: str, expires_in_seconds: int = 86400) -> str:
+def create_access_token(
+    user_id: str,
+    secret: str,
+    expires_in_seconds: int = 86400,
+    algorithm: str = "HS256",
+) -> str:
+    if algorithm != "HS256":
+        raise ValueError("Only HS256 JWTs are supported")
     now = int(time.time())
-    header = {"alg": "HS256", "typ": "JWT"}
+    header = {"alg": algorithm, "typ": "JWT"}
     payload = {
         "sub": user_id,
         "iat": now,
@@ -70,7 +77,9 @@ def create_access_token(user_id: str, secret: str, expires_in_seconds: int = 864
     return f"{signing_input}.{_b64url_encode(sig)}"
 
 
-def decode_access_token(token: str, secret: str) -> dict:
+def decode_access_token(token: str, secret: str, algorithm: str = "HS256") -> dict:
+    if algorithm != "HS256":
+        raise ValueError("Only HS256 JWTs are supported")
     try:
         header_b64, payload_b64, sig_b64 = token.split(".", 2)
     except ValueError as exc:
@@ -90,7 +99,7 @@ def decode_access_token(token: str, secret: str) -> dict:
         payload = json.loads(_b64url_decode(payload_b64))
     except Exception as exc:  # noqa: BLE001
         raise ValueError("Invalid token payload") from exc
-    if header.get("alg") != "HS256":
+    if header.get("alg") != algorithm:
         raise ValueError("Unsupported token algorithm")
     if int(payload.get("exp") or 0) < int(time.time()):
         raise ValueError("Token expired")

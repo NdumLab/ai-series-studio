@@ -192,6 +192,76 @@ def test_authenticated_project_ownership_is_enforced(s):
     a.delete(f"{API}/projects/{pid}")
 
 
+def test_authenticated_nested_resource_ownership_is_enforced(s):
+    _, token_a, _ = _register_user(s, "nested-owner-a")
+    _, token_b, _ = _register_user(s, "nested-owner-b")
+    a = _authed_session(token_a)
+    b = _authed_session(token_b)
+    dbh = _test_db_or_none()
+
+    project = a.post(f"{API}/projects", json={"title": "TEST_Nested_Owned", "idea": "owned"}).json()
+    pid = project["id"]
+    try:
+        scene = a.post(f"{API}/projects/{pid}/scenes", json={"title": "Owned scene"}).json()
+        sid = scene["id"]
+        character = a.post(f"{API}/projects/{pid}/characters", json={"name": "Owned character"}).json()
+        cid = character["id"]
+
+        if dbh is None:
+            pytest.skip("Direct MongoDB access required to seed a segment without spending credits")
+        segment = {
+            "id": f"seg-test-{int(time.time() * 1000)}",
+            "scene_id": sid,
+            "project_id": pid,
+            "order": 0,
+            "parent_segment_id": None,
+            "start_second": 0,
+            "duration": 5,
+            "expand_mode": "initial",
+            "continuity_prompt": "owned",
+            "video_url": "https://example.com/mock.mp4",
+            "status": "pending",
+            "created_at": "2026-01-01T00:00:00+00:00",
+        }
+        dbh.segments.insert_one(segment)
+        seg_id = segment["id"]
+
+        assert b.get(f"{API}/projects/{pid}").status_code == 404
+        assert b.put(f"{API}/projects/{pid}", json={"title": "stolen"}).status_code == 404
+        assert b.delete(f"{API}/projects/{pid}").json()["exists"] is False
+        assert b.post(f"{API}/projects/{pid}/restore").status_code == 404
+
+        assert b.post(f"{API}/projects/{pid}/scenes", json={"title": "bad"}).status_code == 404
+        assert b.put(f"{API}/scenes/{sid}", json={"title": "bad"}).status_code == 404
+        assert b.delete(f"{API}/scenes/{sid}").status_code == 404
+        assert b.post(f"{API}/scenes/{sid}/generate-image").status_code == 404
+        assert b.post(f"{API}/scenes/{sid}/segments").status_code == 404
+        assert b.post(f"{API}/scenes/{sid}/expand").status_code == 404
+        assert b.put(f"{API}/scenes/{sid}/segments/reorder", json={"segment_ids": [seg_id]}).status_code == 404
+
+        assert b.put(f"{API}/characters/{cid}", json={"name": "bad"}).status_code == 404
+        assert b.delete(f"{API}/characters/{cid}").status_code == 404
+        assert b.put(f"{API}/projects/{pid}/characters/reorder", json={"character_ids": [cid]}).status_code == 404
+
+        assert b.put(f"{API}/segments/{seg_id}/status", json={"status": "approved"}).status_code == 404
+        assert b.put(f"{API}/segments/{seg_id}", json={"duration": 6}).status_code == 404
+        assert b.post(f"{API}/segments/{seg_id}/regenerate").status_code == 404
+        assert b.delete(f"{API}/segments/{seg_id}").status_code == 404
+
+        assert b.get(f"{API}/projects/{pid}/cost-estimate").status_code == 404
+        assert b.get(f"{API}/projects/{pid}/scene-costs").status_code == 404
+        assert b.get(f"{API}/projects/{pid}/providers").status_code == 404
+        assert b.put(f"{API}/projects/{pid}/providers", json={"override_providers": True}).status_code == 404
+        assert b.get(f"{API}/projects/{pid}/export").status_code == 404
+
+        # Owner can still mutate the resources after the rejected attempts.
+        assert a.put(f"{API}/scenes/{sid}", json={"title": "Owner edit"}).status_code == 200
+        assert a.put(f"{API}/characters/{cid}", json={"name": "Owner edit"}).status_code == 200
+        assert a.put(f"{API}/segments/{seg_id}/status", json={"status": "approved"}).status_code == 200
+    finally:
+        a.delete(f"{API}/projects/{pid}")
+
+
 def test_demo_mode_still_works_when_auth_disabled(s):
     r = s.post(f"{API}/projects", json={"title": "TEST_Demo_Mode", "idea": "demo"})
     assert r.status_code == 200, r.text

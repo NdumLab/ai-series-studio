@@ -49,6 +49,17 @@ def test_jwt_access_token_round_trip():
     assert payload["exp"] > payload["iat"]
 
 
+def test_jwt_rejects_expired_token():
+    token = create_access_token("user-123", "test-secret", expires_in_seconds=-1)
+
+    try:
+        decode_access_token(token, "test-secret")
+    except ValueError as exc:
+        assert "expired" in str(exc).lower()
+    else:
+        raise AssertionError("Expected expired token to be rejected")
+
+
 def test_jwt_rejects_wrong_secret():
     token = create_access_token("user-123", "test-secret", expires_in_seconds=60)
 
@@ -58,3 +69,12 @@ def test_jwt_rejects_wrong_secret():
         assert "signature" in str(exc).lower()
     else:
         raise AssertionError("Expected wrong secret to be rejected")
+
+
+def test_jwt_rejects_unsupported_algorithm_config():
+    try:
+        create_access_token("user-123", "test-secret", algorithm="none")
+    except ValueError as exc:
+        assert "hs256" in str(exc).lower()
+    else:
+        raise AssertionError("Expected unsupported algorithm to be rejected")

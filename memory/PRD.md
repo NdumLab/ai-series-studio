@@ -155,6 +155,19 @@ because billing and credit fulfillment need a reliable user owner.
 - No Stripe SDK/network calls, checkout sessions, webhooks, live payments,
   real charges, or real credentials were added.
 
+## Iteration 28 (2026-05) — Production auth hardening review
+- Auth envs are documented for production-style configuration:
+  `AUTH_ENABLED`, `AUTH_DEMO_MODE`, `JWT_SECRET_KEY`, `JWT_ALGORITHM`,
+  `JWT_EXPIRE_MINUTES`, and `PASSWORD_MIN_LENGTH`.
+- `AUTH_JWT_SECRET` and `AUTH_TOKEN_EXPIRES_MINUTES` remain backward-compatible
+  aliases, but new deployments should use the `JWT_*` names.
+- JWT helpers reject expired tokens, wrong signatures, and unsupported
+  algorithms. Password minimum length is configurable.
+- Added security tests for missing/invalid token handling, demo-mode behavior,
+  admin protection, and cross-user project/nested-resource ownership.
+- No Stripe checkout/webhooks, API key inputs, real media providers, or real
+  secrets were added.
+
 ## Iteration 2 (2026-02) — Workflow & Segment Model
 - Added persistent "Mock Mode: No real AI APIs connected yet" badge in top nav.
 - Project Studio split into 7 explicit stages: Story → Scenes → Characters → Images → Video Segments → Voice/Music → Export, with a clickable workflow progress strip.
