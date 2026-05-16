@@ -63,6 +63,7 @@ from auth_utils import (  # noqa: E402
     public_user,
     verify_password,
 )
+from credit_utils import wallet_pct, wallet_state  # noqa: E402
 
 
 # Activity recorder — writes safe metadata to the `provider_activity` collection.
@@ -227,13 +228,7 @@ def studio_config() -> dict:
 
 
 def _wallet_state(pct: float) -> str:
-    if pct > 100:
-        return "insufficient"
-    if pct >= 71:
-        return "high"
-    if pct >= 41:
-        return "warning"
-    return "normal"
+    return wallet_state(pct)
 
 DEFAULT_PROVIDER_SETTINGS = {
     "llm": {"provider": "openai", "model": "gpt-5.2", "custom_provider": "", "custom_model": ""},
@@ -431,6 +426,41 @@ async def _owned_segment(segment_id: str, user: dict) -> dict:
         raise HTTPException(404, "Segment not found")
     await _owned_project(seg["project_id"], user)
     return seg
+
+
+async def _reserve_credits(user: dict, cost: int, operation: str) -> int:
+    """Atomically reserve credits for a generation operation.
+
+    Returns the user's remaining balance. The caller must refund if a provider
+    or mock generation fails after reservation.
+    """
+    cost = int(cost or 0)
+    if cost <= 0:
+        return int(user.get("credits") or 0)
+    res = await db.users.update_one(
+        {"id": user["id"], "credits": {"$gte": cost}},
+        {"$inc": {"credits": -cost}},
+    )
+    if res.matched_count == 0:
+        current = await db.users.find_one({"id": user["id"]}, {"_id": 0, "credits": 1})
+        available = int((current or {}).get("credits") or 0)
+        raise HTTPException(
+            402,
+            {
+                "message": "Insufficient credits",
+                "operation": operation,
+                "required_credits": cost,
+                "available_credits": available,
+            },
+        )
+    updated = await db.users.find_one({"id": user["id"]}, {"_id": 0, "credits": 1})
+    return int((updated or {}).get("credits") or 0)
+
+
+async def _refund_credits(user_id: str, cost: int) -> None:
+    cost = int(cost or 0)
+    if cost > 0:
+        await db.users.update_one({"id": user_id}, {"$inc": {"credits": cost}})
 
 
 # ---------------------------------------------------------------------------
@@ -898,7 +928,7 @@ async def project_scene_costs(
     voice_cost = COSTS.get("voice")
     cfg = studio_config()
     if wallet_credits is None:
-        wallet_credits = cfg["wallet_credits"]
+        wallet_credits = int(user.get("credits") if user.get("credits") is not None else cfg["wallet_credits"])
     if high_cost_pct is None:
         high_cost_pct = cfg["high_cost_scene_threshold_percent"]
     high_threshold = high_cost_pct
@@ -941,14 +971,14 @@ async def project_scene_costs(
         row["high_cost"] = bool(grand_total) and share >= high_threshold
 
     wallet_pct_raw = (grand_total / wallet_credits * 100.0) if wallet_credits else 0.0
-    wallet_pct = round(wallet_pct_raw, 1)
+    wallet_pct_value = wallet_pct(grand_total, wallet_credits)
     return {
         "project_id": project_id,
         "mock_mode": True,
         "unit_costs": {"image": image_cost, "video_segment": seg_cost, "voice": voice_cost},
         "grand_total_credits": grand_total,
         "wallet_credits": wallet_credits,
-        "wallet_pct": wallet_pct,
+        "wallet_pct": wallet_pct_value,
         "wallet_state": _wallet_state(wallet_pct_raw),
         "high_cost_scene_threshold_percent": high_threshold,
         "scenes": out,
@@ -990,11 +1020,10 @@ async def create_project(body: ProjectCreate, user: dict = Depends(current_user)
     return doc
 
 
-async def _project_cost_summary(project_id: str, cfg: dict) -> dict:
+async def _project_cost_summary(project_id: str, wallet_credits: int) -> dict:
     image_cost = COSTS.get("image")
     seg_cost = COSTS.get("video_segment")
     voice_cost = COSTS.get("voice")
-    wallet_credits = cfg["wallet_credits"]
     missing = image_cost is None or seg_cost is None or voice_cost is None
 
     scenes = await db.scenes.find({"project_id": project_id}, {"_id": 0, "id": 1}).to_list(500)
@@ -1008,7 +1037,7 @@ async def _project_cost_summary(project_id: str, cfg: dict) -> dict:
     return {
         "grand_total_credits": total,
         "wallet_credits": wallet_credits,
-        "wallet_pct": round(pct_raw, 1),
+        "wallet_pct": wallet_pct(total, wallet_credits),
         "wallet_state": _wallet_state(pct_raw),
         "estimate_unavailable": missing,
     }
@@ -1061,11 +1090,12 @@ def _active_project_filter(extra: Optional[dict] = None) -> dict:
 @api.get("/projects")
 async def list_projects(user: dict = Depends(current_user)):
     cfg = studio_config()
+    wallet_credits = int(user.get("credits") if user.get("credits") is not None else cfg["wallet_credits"])
     projects = await db.projects.find(
         _active_project_filter({"user_id": user["id"]}), {"_id": 0}
     ).sort("created_at", -1).to_list(500)
     for p in projects:
-        p["cost_summary"] = await _project_cost_summary(p["id"], cfg)
+        p["cost_summary"] = await _project_cost_summary(p["id"], wallet_credits)
     return projects
 
 
@@ -1178,6 +1208,8 @@ async def restore_project(project_id: str, user: dict = Depends(current_user)):
 @api.post("/projects/{project_id}/rewrite")
 async def rewrite_story(project_id: str, user: dict = Depends(current_user)):
     proj = await _owned_project(project_id, user)
+    cost = COSTS["rewrite"]
+    remaining_credits = await _reserve_credits(user, cost, "rewrite")
     # Provider execution guard — blocks real LLM call if a flag were on, runs mock otherwise.
     global_settings = await _load_provider_settings()
     mock_text = mock_rewrite_story(proj.get("idea", ""))
@@ -1208,10 +1240,11 @@ async def rewrite_story(project_id: str, user: dict = Depends(current_user)):
             "updated_at": now_iso(),
         }},
     )
-    await log_generation("rewrite", project_id, COSTS["rewrite"], user_id=user["id"])
+    await log_generation("rewrite", project_id, cost, user_id=user["id"])
     return {
         "rewritten_story": rewritten,
-        "cost": COSTS["rewrite"],
+        "cost": cost,
+        "remaining_credits": remaining_credits,
         "quality_scores": scores,
         "llm_mode": guard.mode,
         "llm_status": guard.status,
@@ -1222,6 +1255,8 @@ async def rewrite_story(project_id: str, user: dict = Depends(current_user)):
 @api.post("/projects/{project_id}/split-scenes")
 async def split_scenes(project_id: str, user: dict = Depends(current_user)):
     proj = await _owned_project(project_id, user)
+    cost = COSTS["split_scenes"]
+    remaining_credits = await _reserve_credits(user, cost, "split_scenes")
     # wipe existing scenes for clean split
     existing = await db.scenes.find({"project_id": project_id}, {"_id": 0, "id": 1}).to_list(500)
     for s in existing:
@@ -1242,8 +1277,8 @@ async def split_scenes(project_id: str, user: dict = Depends(current_user)):
     if new_scenes:
         await db.scenes.insert_many([s.copy() for s in new_scenes])
     await db.projects.update_one({"id": project_id}, {"$set": {"status": "scenes_ready", "updated_at": now_iso()}})
-    await log_generation("split_scenes", project_id, COSTS["split_scenes"], user_id=user["id"])
-    return {"scenes": new_scenes}
+    await log_generation("split_scenes", project_id, cost, user_id=user["id"])
+    return {"scenes": new_scenes, "cost": cost, "remaining_credits": remaining_credits}
 
 
 # ---------------------------------------------------------------------------
@@ -1273,6 +1308,8 @@ async def improve_story(project_id: str, body: ImproveStoryRequest, user: dict =
     proj = await _owned_project(project_id, user)
     if not (proj.get("rewritten_story") or "").strip():
         raise HTTPException(400, "Story is empty — rewrite it first.")
+    cost = COSTS["rewrite"]
+    remaining_credits = await _reserve_credits(user, cost, "improve_story")
     mock_story, note = apply_improvement(proj["rewritten_story"], body.kind)
     # Real LLM improvement (LLM modality only). Falls back to mock on failure.
     global_settings = await _load_provider_settings()
@@ -1314,6 +1351,8 @@ async def improve_story(project_id: str, body: ImproveStoryRequest, user: dict =
         "rewritten_story": new_story,
         "quality_scores": scores,
         "improvement": history_entry,
+        "cost": cost,
+        "remaining_credits": remaining_credits,
         "llm_mode": guard.mode,
         "llm_status": guard.status,
         "llm_duration_ms": int((guard.meta or {}).get("duration_ms") or 0),
@@ -1548,6 +1587,8 @@ async def delete_scene(scene_id: str, user: dict = Depends(current_user)):
 @api.post("/scenes/{scene_id}/generate-image")
 async def generate_image(scene_id: str, user: dict = Depends(current_user)):
     scene = await _owned_scene(scene_id, user)
+    cost = COSTS["image"]
+    remaining_credits = await _reserve_credits(user, cost, "image")
     # Provider execution guard — verifies flag + key before any real call.
     proj = await db.projects.find_one({"id": scene["project_id"]}, {"_id": 0})
     global_settings = await _load_provider_settings()
@@ -1555,19 +1596,20 @@ async def generate_image(scene_id: str, user: dict = Depends(current_user)):
         modality="image",
         project=proj,
         global_settings=global_settings,
-        estimated_credits=COSTS["image"],
+        estimated_credits=cost,
         project_id=scene["project_id"],
         scene_id=scene_id,
     )
     log.info("provider.image mode=%s status=%s provider=%s/%s", guard.mode, guard.status, guard.provider_name, guard.model_name)
     # 5% mock failure to power admin failed jobs widget
     if random.random() < 0.05:
+        await _refund_credits(user["id"], cost)
         await log_generation("image", scene["project_id"], 0, status="failed", error="mock provider timeout", user_id=user["id"])
         raise HTTPException(503, "Mock image provider timed out")
     url = random.choice(MOCK_SCENE_IMAGES)
     await db.scenes.update_one({"id": scene_id}, {"$set": {"image_url": url, "status": "image_ready"}})
-    await log_generation("image", scene["project_id"], COSTS["image"], user_id=user["id"])
-    return {"image_url": url, "cost": COSTS["image"]}
+    await log_generation("image", scene["project_id"], cost, user_id=user["id"])
+    return {"image_url": url, "cost": cost, "remaining_credits": remaining_credits}
 
 
 async def _create_scene_segment(
@@ -1583,6 +1625,8 @@ async def _create_scene_segment(
     expand_mode = "expand"  → continues from latest segment under the same scene.
     """
     scene = await _owned_scene(scene_id, user)
+    cost = COSTS["video_segment"]
+    remaining_credits = await _reserve_credits(user, cost, "video_segment")
     # Provider execution guard for video generation.
     proj = await db.projects.find_one({"id": scene["project_id"]}, {"_id": 0})
     global_settings = await _load_provider_settings()
@@ -1590,12 +1634,13 @@ async def _create_scene_segment(
         modality="video",
         project=proj,
         global_settings=global_settings,
-        estimated_credits=COSTS["video_segment"],
+        estimated_credits=cost,
         project_id=scene["project_id"],
         scene_id=scene_id,
     )
     log.info("provider.video mode=%s status=%s provider=%s/%s", guard.mode, guard.status, guard.provider_name, guard.model_name)
     if random.random() < 0.05:
+        await _refund_credits(user["id"], cost)
         await log_generation("video_segment", scene["project_id"], 0, status="failed", error="mock render failed", user_id=user["id"])
         raise HTTPException(503, "Mock video render failed")
 
@@ -1626,7 +1671,9 @@ async def _create_scene_segment(
     }
     await db.segments.insert_one(doc.copy())
     await db.scenes.update_one({"id": scene_id}, {"$set": {"status": "video_ready"}})
-    await log_generation("video_segment", scene["project_id"], COSTS["video_segment"], user_id=user["id"])
+    await log_generation("video_segment", scene["project_id"], cost, user_id=user["id"])
+    doc["cost"] = cost
+    doc["remaining_credits"] = remaining_credits
     return doc
 
 
@@ -1735,7 +1782,10 @@ async def reorder_segments(scene_id: str, body: ReorderSegmentsBody, user: dict 
 @api.post("/segments/{segment_id}/regenerate")
 async def regenerate_segment(segment_id: str, user: dict = Depends(current_user)):
     seg = await _owned_segment(segment_id, user)
+    cost = COSTS["video_segment"]
+    remaining_credits = await _reserve_credits(user, cost, "video_segment")
     if random.random() < 0.05:
+        await _refund_credits(user["id"], cost)
         await log_generation("video_segment", seg.get("project_id"), 0, status="failed", error="mock regen failed", user_id=user["id"])
         raise HTTPException(503, "Mock video regen failed")
     new_url = random.choice(MOCK_VIDEO_URLS)
@@ -1743,8 +1793,11 @@ async def regenerate_segment(segment_id: str, user: dict = Depends(current_user)
         {"id": segment_id},
         {"$set": {"video_url": new_url, "status": "pending"}},
     )
-    await log_generation("video_segment", seg.get("project_id"), COSTS["video_segment"], user_id=user["id"])
-    return await db.segments.find_one({"id": segment_id}, {"_id": 0})
+    await log_generation("video_segment", seg.get("project_id"), cost, user_id=user["id"])
+    out = await db.segments.find_one({"id": segment_id}, {"_id": 0})
+    out["cost"] = cost
+    out["remaining_credits"] = remaining_credits
+    return out
 
 
 @api.post("/scenes/{scene_id}/reduce-to-draft")
@@ -1817,7 +1870,14 @@ async def project_cost_estimate(project_id: str, user: dict = Depends(current_us
         "voice": n_scenes,
     }
     total = sum(COSTS.get(k, 0) * v for k, v in ops.items())
-    return {"total_credits": total, "operations": ops, "unit_costs": COSTS}
+    available = int(user.get("credits") or 0)
+    return {
+        "total_credits": total,
+        "operations": ops,
+        "unit_costs": COSTS,
+        "available_credits": available,
+        "can_afford": available >= total,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1841,12 +1901,14 @@ async def export_project(project_id: str, user: dict = Depends(current_user)):
             })
             total_seconds += seg.get("duration", 5)
     final_url = MOCK_VIDEO_URLS[0]  # mock stitched output
+    ready = len(approved) > 0
     return {
         "project": proj,
         "approved_segments": approved,
         "total_duration_seconds": total_seconds,
         "final_video_url": final_url if approved else None,
-        "ready": len(approved) > 0,
+        "ready": ready,
+        "cost": COSTS["export"] if ready else 0,
     }
 
 

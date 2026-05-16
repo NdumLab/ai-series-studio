@@ -6,6 +6,13 @@ const TOKEN_KEY = "ai_episode_studio_token";
 
 export const api = axios.create({ baseURL: API });
 
+export function apiErrorMessage(err, fallback = "Request failed") {
+  const detail = err?.response?.data?.detail;
+  if (typeof detail === "string") return detail;
+  if (detail?.message) return detail.message;
+  return fallback;
+}
+
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem(TOKEN_KEY);
   if (token) {

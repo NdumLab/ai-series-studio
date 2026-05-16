@@ -7,7 +7,7 @@ import { ProviderHintChip } from "../../components/studio/ProviderHintChip";
 import { InfoCallout } from "../../components/studio/InfoCallout";
 import { EmptyState } from "../../components/studio/EmptyState";
 import { SegmentCard } from "../../components/studio/SegmentCard";
-import { Creative, Scenes } from "../../lib/api";
+import { apiErrorMessage, Creative, Scenes } from "../../lib/api";
 import { withRealLLMToast } from "../../lib/llmToast";
 
 const VIDEO_HINT =
@@ -50,8 +50,8 @@ function SceneSegmentBlock({ scene, index, setData, reload }) {
       await Scenes.generateSegment(scene.id);
       toast.success("Initial 5s segment generated");
       reload();
-    } catch {
-      toast.error("Generation failed (mock)");
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Generation failed (mock)"));
     } finally {
       setBusy(false);
     }
@@ -63,8 +63,8 @@ function SceneSegmentBlock({ scene, index, setData, reload }) {
       await Scenes.expand(scene.id);
       toast.success("+5s expansion added");
       reload();
-    } catch {
-      toast.error("Expansion failed (mock)");
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Expansion failed (mock)"));
     } finally {
       setBusy(false);
     }

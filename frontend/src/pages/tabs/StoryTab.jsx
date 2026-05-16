@@ -6,7 +6,7 @@ import { Textarea } from "../../components/ui/textarea";
 import { ProviderHintChip } from "../../components/studio/ProviderHintChip";
 import { QualityScorePanel } from "../../components/studio/QualityScorePanel";
 import { ImproveStoryMenu } from "../../components/studio/ImproveStoryMenu";
-import { Projects } from "../../lib/api";
+import { apiErrorMessage, Projects } from "../../lib/api";
 import { withRealLLMToast } from "../../lib/llmToast";
 
 export function StoryTab({ project, providers, options, reload, onContinue }) {
@@ -29,8 +29,10 @@ export function StoryTab({ project, providers, options, reload, onContinue }) {
         toast.success(`Story rewritten · -${res.cost} credits`);
       }
       reload();
-    } catch {
-      // withRealLLMToast already toasted error; nothing extra needed.
+    } catch (err) {
+      if (err?.response?.status === 402) {
+        toast.error(apiErrorMessage(err, "Insufficient credits"));
+      }
     } finally {
       setBusy(false);
     }
@@ -50,8 +52,8 @@ export function StoryTab({ project, providers, options, reload, onContinue }) {
       toast.success("Split into scenes");
       reload();
       onContinue();
-    } catch {
-      toast.error("Scene split failed");
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Scene split failed"));
     } finally {
       setBusy(false);
     }

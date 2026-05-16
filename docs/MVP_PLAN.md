@@ -37,7 +37,8 @@ Completed today:
 - Mock non-LLM providers: Image, Video, Voice, Music, and Export remain
   mock-only.
 - Cost tracking: operation costs, project/scene estimates, wallet ring,
-  high-cost scene warnings, trend deltas, and reduce-to-draft.
+  high-cost scene warnings, trend deltas, reduce-to-draft, per-user credit
+  balances, and insufficient-credit blocking for generation actions.
 - Admin monitoring: stats, users, projects, generations, failed jobs, provider
   activity, provider health, and Recently Deleted.
 - Soft delete/restore: dashboard undo, restore endpoint, Admin Recently
@@ -80,6 +81,7 @@ Completed:
 - [x] Admin monitoring.
 - [x] Local setup docs.
 - [x] Basic auth and project ownership.
+- [x] Basic credit wallet and generation guardrails.
 
 Remaining:
 
@@ -89,9 +91,9 @@ Remaining:
 - [ ] Real music/SFX provider.
 - [ ] Real FFmpeg export worker.
 - [ ] S3/R2 storage.
-- [ ] Stripe/credits.
+- [ ] Stripe test metering.
 - [ ] Production deployment.
-- [ ] Basic rate limiting/cost guards.
+- [ ] Basic rate limiting.
 - [ ] End-to-end real media test.
 
 ## E. Recommended Build Order From Here
@@ -104,38 +106,45 @@ Remaining:
 
 ### Phase 2: Credit wallet and cost guardrails
 
-- Replace mock 250-credit wallet.
-- Add Stripe test metering.
-- Add credit deduction.
-- Add insufficient-credit blocking.
+- Completed: replace display-only wallet with per-user credit balances.
+- Completed: add credit deduction/reservation for generation actions.
+- Completed: add insufficient-credit blocking.
+- Remaining: Stripe test metering belongs to Phase 3 after wallet logic is
+  stable.
 
-### Phase 3: Real image provider
+### Phase 3: Stripe test metering
+
+- Add Stripe test integration.
+- Keep test mode only.
+- Do not enable live payments.
+
+### Phase 4: Real image provider
 
 - Add one real image provider first.
 - Generate character images.
 - Generate scene images.
 - Keep video mocked.
 
-### Phase 4: Real video provider
+### Phase 5: Real video provider
 
 - Add one real video provider.
 - Start with 5-second segments.
 - Keep Expand Next 5 Seconds gated and cost-controlled.
 
-### Phase 5: Real voice/music
+### Phase 6: Real voice/music
 
 - Add voice provider.
 - Add music/SFX provider.
 - Keep optional upload fallback.
 
-### Phase 6: Real export
+### Phase 7: Real export
 
 - Add FFmpeg worker.
 - Merge approved clips.
 - Add voice/music/subtitles.
 - Store final MP4 in S3/R2.
 
-### Phase 7: Private beta
+### Phase 8: Private beta
 
 - Invite limited testers.
 - Cap credits.

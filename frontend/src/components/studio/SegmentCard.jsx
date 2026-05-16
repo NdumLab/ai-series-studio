@@ -4,7 +4,7 @@ import { Check, X, RefreshCw, Trash2, Link2 } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
-import { Segments } from "../../lib/api";
+import { apiErrorMessage, Segments } from "../../lib/api";
 
 export function SegmentCard({ segment, index, parent, dragHandle, reload }) {
   const [busy, setBusy] = useState(false);
@@ -42,8 +42,8 @@ export function SegmentCard({ segment, index, parent, dragHandle, reload }) {
       await Segments.regenerate(segment.id);
       toast.success("Regenerated");
       reload();
-    } catch {
-      toast.error("Regen failed (mock)");
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Regen failed (mock)"));
     } finally {
       setBusy(false);
     }

@@ -37,6 +37,8 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 - Provider settings + per-project provider overrides; real LLM is gated and available for text operations, non-LLM modalities remain mock-only.
 - Scene reorder, segment reorder, and character reorder are implemented.
 - MVP auth and project ownership are implemented with local demo compatibility.
+- Per-user credit balances and insufficient-credit blocking are implemented for
+  generation actions.
 - Current backend suite has grown substantially since the MVP baseline; see later iteration notes for exact counts.
 
 ## P1 Completed
@@ -50,11 +52,11 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 - Current MVP status: mock-first workflow is mature; real LLM is gated and
   available for text operations; image/video/voice/music/export remain
   mock-only.
-- 100% MVP still requires credit guardrails, real image generation, real video
-  segments, real voice/music or upload fallback, real FFmpeg export, durable
-  object storage, deployment, and end-to-end real media validation.
+- 100% MVP still requires Stripe test metering, real image generation, real
+  video segments, real voice/music or upload fallback, real FFmpeg export,
+  durable object storage, deployment, and end-to-end real media validation.
 - Recommended build order:
-  1. Credit wallet and cost guardrails.
+  1. Stripe test metering.
   2. Real image provider.
   3. Real video provider.
   4. Real voice/music.
@@ -66,7 +68,6 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
   1-minute video.
 
 ## Backlog (P2)
-- Credit wallet and cost guardrails.
 - Stripe metering.
 - Real Image provider.
 - Real Video provider.
@@ -93,6 +94,20 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
   token in local storage for API requests.
 - No Stripe, paid provider calls, API key inputs, or real image/video/voice/
   music/export providers were added.
+
+## Iteration 26 (2026-05) — Credit wallet guardrails
+- Replaced the display-only wallet with per-user credit balances for generation
+  actions.
+- Story rewrite, story improvement, scene split, image generation, video
+  segment generation, and video segment regeneration reserve/deduct credits
+  before execution.
+- Insufficient-credit requests return HTTP 402 with required and available
+  credit details.
+- Mock provider failures refund reserved credits before returning the failure.
+- Project scene-cost and dashboard wallet summaries now use the current user's
+  remaining credit balance.
+- Stripe remains disabled and no paid provider calls or API key inputs were
+  added.
 
 ## Iteration 2 (2026-02) — Workflow & Segment Model
 - Added persistent "Mock Mode: No real AI APIs connected yet" badge in top nav.

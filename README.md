@@ -24,6 +24,10 @@ cost controls, testing strategy, launch criteria, and post-MVP scope.
 - MVP auth is implemented with local email/password beta accounts, bearer
   sessions, and per-user project ownership. Requests without a token still use
   `user-demo` when `AUTH_DEMO_MODE=true` for local demo compatibility.
+- Per-user credit balances are enforced for generation actions. The backend
+  reserves credits before story rewrite, story improvement, scene split, image
+  generation, and video segment generation, blocks insufficient-credit requests,
+  and refunds credits on mock provider failure.
 - Characters support an `order` field and drag handles in the Cast /
   Characters view.
 - Scene, segment, and character reorder are implemented with optimistic
@@ -215,7 +219,7 @@ Provider-layer unit tests can run without a running backend:
 ```bash
 cd backend
 source .venv/bin/activate
-python -m pytest tests/test_provider_layer.py tests/test_phase2b_llm.py tests/test_auth_helpers.py
+python -m pytest tests/test_provider_layer.py tests/test_phase2b_llm.py tests/test_auth_helpers.py tests/test_credit_utils.py
 ```
 
 ## Frontend Lint And Build

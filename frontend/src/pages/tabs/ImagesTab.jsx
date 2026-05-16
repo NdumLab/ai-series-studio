@@ -5,7 +5,7 @@ import { Button } from "../../components/ui/button";
 import { ProviderHintChip } from "../../components/studio/ProviderHintChip";
 import { InfoCallout } from "../../components/studio/InfoCallout";
 import { EmptyState } from "../../components/studio/EmptyState";
-import { Creative, Scenes } from "../../lib/api";
+import { apiErrorMessage, Creative, Scenes } from "../../lib/api";
 import { withRealLLMToast } from "../../lib/llmToast";
 
 const IMAGE_HINT =
@@ -46,8 +46,8 @@ function SceneImageCard({ scene, index, reload }) {
       const res = await Scenes.generateImage(scene.id);
       toast.success(`Image generated · -${res.cost} credits`);
       reload();
-    } catch {
-      toast.error("Image gen failed (mock)");
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Image gen failed (mock)"));
     } finally {
       setBusy(false);
     }
