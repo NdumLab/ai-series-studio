@@ -14,6 +14,7 @@ export default function Admin() {
   const [users, setUsers] = useState([]);
   const [projects, setProjects] = useState([]);
   const [gens, setGens] = useState([]);
+  const [creditEvents, setCreditEvents] = useState([]);
   const [failed, setFailed] = useState([]);
   const [activity, setActivity] = useState({ items: [], count: 0 });
   const [health, setHealth] = useState({ window_minutes: 60, modalities: [] });
@@ -34,6 +35,7 @@ export default function Admin() {
     AdminApi.users().then(setUsers);
     AdminApi.projects().then(setProjects);
     AdminApi.generations().then(setGens);
+    AdminApi.creditEvents().then(setCreditEvents);
     AdminApi.failedJobs().then(setFailed);
     loadActivity();
     loadHealth();
@@ -85,6 +87,7 @@ export default function Admin() {
           <TabsTrigger value="users" data-testid="admin-tab-users">Users</TabsTrigger>
           <TabsTrigger value="projects" data-testid="admin-tab-projects">Projects</TabsTrigger>
           <TabsTrigger value="generations" data-testid="admin-tab-generations">Generations</TabsTrigger>
+          <TabsTrigger value="credits" data-testid="admin-tab-credits">Credits</TabsTrigger>
           <TabsTrigger value="failed" data-testid="admin-tab-failed">Failed jobs</TabsTrigger>
           <TabsTrigger value="provider-activity" data-testid="admin-tab-provider-activity">
             <span className="inline-flex items-center gap-1.5">
@@ -108,12 +111,14 @@ export default function Admin() {
 
         <TabsContent value="users" className="mt-4">
           <Table
-            head={["Name", "Email", "Role", "Credits", "Joined"]}
+            head={["Name", "Email", "Role", "Available", "Used", "Reserved", "Joined"]}
             rows={users.map((u) => [
               u.name,
               u.email,
               u.role,
-              u.credits,
+              u.credits ?? 0,
+              u.credits_used ?? 0,
+              u.credits_reserved ?? 0,
               new Date(u.created_at).toLocaleDateString(),
             ])}
             testId="admin-users-table"
@@ -143,6 +148,22 @@ export default function Admin() {
               new Date(g.created_at).toLocaleString(),
             ])}
             testId="admin-generations-table"
+          />
+        </TabsContent>
+
+        <TabsContent value="credits" className="mt-4">
+          <Table
+            head={["When", "User", "Project", "Operation", "Delta", "Balance", "Reason"]}
+            rows={creditEvents.map((e) => [
+              new Date(e.created_at).toLocaleString(),
+              e.user_id?.slice(0, 12) || "—",
+              e.project_id?.slice(0, 8) || "—",
+              e.operation,
+              e.credits_delta,
+              e.balance_after,
+              e.reason || "—",
+            ])}
+            testId="admin-credit-events-table"
           />
         </TabsContent>
 

@@ -38,13 +38,14 @@ Completed today:
   mock-only.
 - Cost tracking: operation costs, project/scene estimates, wallet ring,
   high-cost scene warnings, trend deltas, reduce-to-draft, per-user credit
-  balances, and insufficient-credit blocking for generation actions.
+  balances, `GET /api/credits/status`, credit event logging, and
+  insufficient-credit blocking for generation actions.
 - Billing readiness: Stripe test-mode readiness gate, billing config helper,
   `GET /api/billing/status`, Settings-page status display, and disabled env
   placeholders exist. No Stripe SDK/network calls, checkout sessions, webhooks,
   live payments, or real credentials are present.
-- Admin monitoring: stats, users, projects, generations, failed jobs, provider
-  activity, provider health, and Recently Deleted.
+- Admin monitoring: stats, users, projects, generations, credit events, failed
+  jobs, provider activity, provider health, and Recently Deleted.
 - Soft delete/restore: dashboard undo, restore endpoint, Admin Recently
   Deleted panel, and background purge scheduler.
 - Developer setup: backend requirements, frontend lockfile, env examples,
@@ -91,7 +92,7 @@ Completed:
 Remaining:
 
 - [ ] Production auth/user ownership hardening before paid billing.
-- [ ] Real credit wallet tied to users and Stripe fulfillment.
+- [ ] Stripe credit fulfillment tied to real users.
 - [ ] Real image provider.
 - [ ] Real video provider.
 - [ ] Real voice provider.
@@ -120,8 +121,13 @@ real Stripe checkout, webhook fulfillment, and paid provider work.
 ### Phase 2: Credit wallet and cost guardrails
 
 - Completed: replace display-only wallet with per-user credit balances.
-- Completed: add credit deduction/reservation for generation actions.
+- Completed: add `GET /api/credits/status`.
+- Completed: use authenticated user wallets in project/scene estimates and the
+  dashboard wallet display.
+- Completed: check credits before expensive generation actions and deduct
+  credits after successful generation.
 - Completed: add insufficient-credit blocking.
+- Completed: record `credit_events` and show credit usage in Admin.
 - Remaining: Stripe test metering belongs to Phase 3 after wallet logic is
   stable.
 
@@ -184,9 +190,11 @@ before execution, and expensive jobs must be constrained by wallet and project
 budget state.
 
 Video is the most expensive provider and should be introduced with low test
-budgets, per-scene warnings, and project-wide budget warnings. Before expensive
-generation, either charge credits up front or reserve credits before job
-execution. Refund credits on provider failure where appropriate.
+budgets, per-scene warnings, and project-wide budget warnings. Current MVP
+behavior checks the wallet before expensive mock generation and deducts after
+successful completion. Failed or blocked generation does not deduct credits.
+Future queued provider jobs may reserve credits before execution and refund
+credits on provider failure where appropriate.
 
 Required guardrails:
 

@@ -14,12 +14,13 @@ Build a full-stack web MVP called AI Episode Studio that helps creators generate
 - Mock generators return curated static URLs (Unsplash + Google sample mp4s) and log every generation/provider activity.
 
 ## Data Models (MongoDB collections)
-- users: id, name, email, role, credits, optional password hash/salt, created_at
+- users: id, name, email, role, credits, credits_reserved, credits_used, optional password hash/salt, created_at, updated_at
 - projects: id, user_id, title, idea, rewritten_story, status, provider override fields, optional soft-delete fields (`deleted_at`, `deleted_by`, `delete_expires_at`, `previous_status`), quality_scores, created_at, updated_at
 - characters: id, project_id, order, name, description, voice_style, voice_provider, voice_model, reference_image_url
 - scenes: id, project_id, order, title, duration, location, characters[], visual_prompt, raw/enhanced prompts, dialogue, music_mood, camera_direction, tension fields, voice, image_url, status
 - segments: id, scene_id, project_id, order, parent_segment_id, start_second, expand_mode, continuity_prompt, video_url, duration, status (pending/approved/rejected)
 - generations: id, user_id, project_id, type, cost_credits, status, error, created_at
+- credit_events: id, user_id, project_id, operation, credits_delta, balance_after, reason, created_at
 - provider_activity: safe provider metadata only (no prompts, outputs, or API keys)
 
 ## Costs (credits)
@@ -37,8 +38,8 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 - Provider settings + per-project provider overrides; real LLM is gated and available for text operations, non-LLM modalities remain mock-only.
 - Scene reorder, segment reorder, and character reorder are implemented.
 - MVP auth and project ownership are implemented with local demo compatibility.
-- Per-user credit balances and insufficient-credit blocking are implemented for
-  generation actions.
+- Per-user credit balances, `GET /api/credits/status`, credit event logging,
+  and insufficient-credit blocking are implemented for generation actions.
 - Stripe test-mode readiness gate exists: `GET /api/billing/status`, a billing
   config helper, disabled env placeholders, and Settings-page status. Stripe
   SDK/network calls, checkout sessions, webhooks, live payments, and real
@@ -59,14 +60,14 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
   available for text operations; image/video/voice/music/export remain
   mock-only.
 - 100% MVP still requires production auth/user ownership hardening, a real
-  user-tied credit wallet with Stripe fulfillment, Stripe checkout/session
-  creation and webhooks, real image generation, real video segments, real
+  Stripe credit fulfillment, Stripe checkout/session creation and webhooks,
+  real image generation, real video segments, real
   voice/music or upload fallback, real FFmpeg export, durable object storage,
   deployment, and end-to-end real media validation.
 - Recommended build order:
   1. Production auth/user ownership hardening.
-  2. Real credit wallet tied to users.
-  3. Stripe checkout/session creation and webhook credit fulfillment.
+  2. Stripe checkout/session creation and webhook credit fulfillment.
+  3. Production credit fulfillment tied to users.
   4. Real image provider.
   5. Real video provider.
   6. Real voice/music.
@@ -79,7 +80,7 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 
 ## Backlog (P2)
 - Production auth/user ownership hardening.
-- Real credit wallet tied to users and Stripe fulfillment.
+- Stripe credit fulfillment tied to users.
 - Stripe checkout/session creation and webhooks.
 - Real Image provider.
 - Real Video provider.
@@ -126,12 +127,15 @@ because billing and credit fulfillment need a reliable user owner.
 ## Iteration 26 (2026-05) — Credit wallet guardrails
 - Replaced the display-only wallet with per-user credit balances for generation
   actions.
-- Story rewrite, story improvement, scene split, image generation, video
-  segment generation, and video segment regeneration reserve/deduct credits
-  before execution.
+- Added `GET /api/credits/status` for the current user's available, reserved,
+  and used credits.
+- Story rewrite, story improvement, scene split, prompt enhancement, image
+  generation, video segment generation/regeneration, and mock export check
+  credits before execution and deduct credits only after successful completion.
 - Insufficient-credit requests return HTTP 402 with required and available
   credit details.
-- Mock provider failures refund reserved credits before returning the failure.
+- Failed or blocked generation does not deduct credits.
+- Successful deductions write `credit_events` for admin visibility.
 - Project scene-cost and dashboard wallet summaries now use the current user's
   remaining credit balance.
 - Stripe remains disabled and no paid provider calls or API key inputs were

@@ -26,9 +26,10 @@ cost controls, testing strategy, launch criteria, and post-MVP scope.
   use `user-demo` when `AUTH_ENABLED=false` and `AUTH_DEMO_MODE=true` for local
   demo compatibility.
 - Per-user credit balances are enforced for generation actions. The backend
-  reserves credits before story rewrite, story improvement, scene split, image
-  generation, and video segment generation, blocks insufficient-credit requests,
-  and refunds credits on mock provider failure.
+  checks credits before story rewrite, story improvement, scene split, prompt
+  enhancement, image generation, video segment generation/regeneration, and
+  mock export, deducts only after successful generation, and blocks
+  insufficient-credit requests with HTTP 402.
 - Characters support an `order` field and drag handles in the Cast /
   Characters view.
 - Scene, segment, and character reorder are implemented with optimistic
@@ -121,6 +122,32 @@ STRIPE_WEBHOOK_SECRET=
 ```
 
 No real credentials are committed.
+
+## Credit Wallet
+
+MVP credit ownership is implemented without Stripe checkout or webhooks. Each
+user record stores available, reserved, and used credits. Local/demo mode uses
+the seeded `user-demo` wallet.
+
+```http
+GET /api/credits/status
+```
+
+Response shape:
+
+```json
+{
+  "user_id": "user-demo",
+  "credits_available": 250,
+  "credits_reserved": 0,
+  "credits_used": 0,
+  "currency": "credits"
+}
+```
+
+Server-side credit guards protect expensive mock generation actions before
+work starts. Successful actions deduct credits and write safe `credit_events`
+metadata for admin visibility. Failed or blocked actions do not deduct credits.
 
 ## Prerequisites
 

@@ -81,8 +81,8 @@ function SceneSegmentBlock({ scene, index, setData, reload }) {
         toast.success("Video prompt enhanced");
       }
       reload();
-    } catch {
-      toast.error("Enhance failed");
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Enhance failed"));
     } finally {
       setBusy(false);
     }

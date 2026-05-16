@@ -2,7 +2,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Flame, Theater, MessageSquare } from "lucide-react";
 import { Button } from "../ui/button";
-import { Creative } from "../../lib/api";
+import { apiErrorMessage, Creative } from "../../lib/api";
 import { withRealLLMToast } from "../../lib/llmToast";
 
 function tensionColor(v) {
@@ -32,8 +32,8 @@ export function SceneTensionMeter({ scene, onImproved }) {
         );
       }
       onImproved?.(res.scene);
-    } catch {
-      toast.error("Enhancement failed");
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Enhancement failed"));
     } finally {
       setBusy(false);
     }

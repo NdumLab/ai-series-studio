@@ -14,7 +14,7 @@ import {
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
 import { Button } from "../components/ui/button";
-import { Projects } from "../lib/api";
+import { Credits, Projects } from "../lib/api";
 
 const STATUS_LABEL = {
   draft: "Draft",
@@ -82,8 +82,14 @@ function MiniWalletRing({ summary }) {
   );
 }
 
+function creditValue(status) {
+  if (!status) return "—";
+  return status.credits_available;
+}
+
 export default function Dashboard() {
   const [projects, setProjects] = useState([]);
+  const [creditStatus, setCreditStatus] = useState(null);
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [idea, setIdea] = useState("");
@@ -92,8 +98,11 @@ export default function Dashboard() {
   const [sortKey, setSortKey] = useState("newest");
 
   const load = () =>
-    Projects.list()
-      .then(setProjects)
+    Promise.all([Projects.list(), Credits.status()])
+      .then(([projectRows, credits]) => {
+        setProjects(projectRows);
+        setCreditStatus(credits);
+      })
       .finally(() => setLoading(false));
 
   useEffect(() => {
@@ -108,6 +117,7 @@ export default function Dashboard() {
     setCreating(true);
     try {
       const p = await Projects.create({ title: title.trim(), idea: idea.trim() });
+      Credits.status().then(setCreditStatus).catch(() => undefined);
       toast.success("Project created");
       setOpen(false);
       setTitle("");
@@ -238,7 +248,12 @@ export default function Dashboard() {
           icon={<Clock className="w-4 h-4" />}
         />
         <Stat label="Mock provider" value="Active" icon={<Sparkles className="w-4 h-4" />} />
-        <Stat label="Credits / scene" value="~8" icon={<Sparkles className="w-4 h-4" />} />
+        <Stat
+          label="Wallet"
+          value={creditValue(creditStatus)}
+          sub="credits available"
+          icon={<Sparkles className="w-4 h-4" />}
+        />
       </div>
 
       {/* Projects grid */}
@@ -355,7 +370,7 @@ function ProjectCard({ project, onDelete }) {
 
 
 
-function Stat({ label, value, icon }) {
+function Stat({ label, value, icon, sub }) {
   return (
     <div className="es-card p-4">
       <div className="flex items-center justify-between mb-2 text-[#A1A1AA]">
@@ -363,6 +378,7 @@ function Stat({ label, value, icon }) {
         <span>{icon}</span>
       </div>
       <div className="font-display text-2xl font-bold">{value}</div>
+      {sub && <div className="text-[11px] text-[#A1A1AA] mt-1">{sub}</div>}
     </div>
   );
 }

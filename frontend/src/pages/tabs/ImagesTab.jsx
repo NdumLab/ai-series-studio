@@ -63,8 +63,8 @@ function SceneImageCard({ scene, index, reload }) {
         toast.success("Image prompt enhanced");
       }
       reload();
-    } catch {
-      toast.error("Enhance failed");
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Enhance failed"));
     } finally {
       setEnhancing(false);
     }

@@ -108,6 +108,10 @@ export const Billing = {
   status: () => api.get("/billing/status").then((r) => r.data),
 };
 
+export const Credits = {
+  status: () => api.get("/credits/status").then((r) => r.data),
+};
+
 export const Creative = {
   hints: () => api.get("/creative/enhancement-hints").then((r) => r.data),
   recomputeScore: (projectId) =>
@@ -136,6 +140,7 @@ export const Admin = {
   users: () => api.get("/admin/users").then((r) => r.data),
   projects: () => api.get("/admin/projects").then((r) => r.data),
   generations: () => api.get("/admin/generations").then((r) => r.data),
+  creditEvents: () => api.get("/admin/credit-events").then((r) => r.data),
   failedJobs: () => api.get("/admin/failed-jobs").then((r) => r.data),
   providerActivity: (limit = 50) =>
     api.get(`/admin/provider-activity?limit=${limit}`).then((r) => r.data),

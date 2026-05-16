@@ -10,7 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
-import { Creative } from "../../lib/api";
+import { apiErrorMessage, Creative } from "../../lib/api";
 import { withRealLLMToast } from "../../lib/llmToast";
 
 const IMPROVE_OPTIONS = [
@@ -38,10 +38,10 @@ export function ImproveStoryMenu({ projectId, disabled, onImproved }) {
         toast.success(res.improvement.note);
       }
       onImproved?.(res);
-    } catch {
+    } catch (err) {
       // withRealLLMToast handled the error toast in real mode; show fallback
       // for mock mode where the helper short-circuited.
-      toast.error("Improve failed");
+      toast.error(apiErrorMessage(err, "Improve failed"));
     } finally {
       setBusy(false);
     }

@@ -97,6 +97,44 @@ def _register_user(s, label):
     return email, d["token"], d["user"]
 
 
+def _authed_session(token):
+    sess = requests.Session()
+    sess.headers.update({
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}",
+    })
+    return sess
+
+
+def _test_db_or_none():
+    if not os.environ.get("MONGO_URL") or not os.environ.get("DB_NAME"):
+        return None
+    try:
+        from pymongo import MongoClient
+
+        cli = MongoClient(os.environ["MONGO_URL"], serverSelectionTimeoutMS=1000)
+        cli.admin.command("ping")
+        return cli[os.environ["DB_NAME"]]
+    except Exception:
+        return None
+
+
+@pytest.fixture(autouse=True)
+def reset_demo_wallet_between_tests():
+    dbh = _test_db_or_none()
+    if dbh is not None:
+        dbh.users.update_one(
+            {"id": "user-demo"},
+            {
+                "$set": {
+                    "credits": 250,
+                    "credits_reserved": 0,
+                    "credits_used": 0,
+                }
+            },
+        )
+
+
 def test_auth_signup_login_current_user_and_invalid_login(s):
     cfg = s.get(f"{API}/auth/config")
     assert cfg.status_code == 200
@@ -166,6 +204,144 @@ def test_admin_endpoints_demo_safe(s):
     r = s.get(f"{API}/admin/stats")
     assert r.status_code == 200
     assert "users" in r.json()
+
+
+def test_credit_status_demo_wallet_exists(s):
+    r = s.get(f"{API}/credits/status")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["user_id"] == "user-demo"
+    assert d["credits_available"] == 250
+    assert d["credits_reserved"] == 0
+    assert d["credits_used"] == 0
+    assert d["currency"] == "credits"
+
+
+def test_credit_status_authenticated_user_wallet_exists(s):
+    _, token, user = _register_user(s, "credits")
+    authed = _authed_session(token)
+
+    r = authed.get(f"{API}/credits/status")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["user_id"] == user["id"]
+    assert d["credits_available"] == 250
+    assert d["credits_reserved"] == 0
+    assert d["credits_used"] == 0
+
+
+def test_project_cost_compares_against_authenticated_wallet(s):
+    _, token, user = _register_user(s, "wallet-cost")
+    authed = _authed_session(token)
+    dbh = _test_db_or_none()
+    if dbh is None:
+        pytest.skip("Direct MongoDB access required to adjust test wallet balance")
+    dbh.users.update_one({"id": user["id"]}, {"$set": {"credits": 50, "credits_used": 200}})
+
+    p = authed.post(f"{API}/projects", json={"title": "TEST_Wallet_Owned", "idea": "x"}).json()
+    pid = p["id"]
+    try:
+        authed.post(f"{API}/projects/{pid}/rewrite")
+        authed.post(f"{API}/projects/{pid}/split-scenes")
+        d = authed.get(f"{API}/projects/{pid}/scene-costs").json()
+        assert d["wallet_credits"] == 43  # 50 - rewrite(3) - split(4)
+        assert d["wallet_state"] == "insufficient"
+    finally:
+        authed.delete(f"{API}/projects/{pid}")
+
+
+def test_generation_deducts_credits_and_records_event(s):
+    _, token, user = _register_user(s, "spend")
+    authed = _authed_session(token)
+    p = authed.post(f"{API}/projects", json={"title": "TEST_Spend", "idea": "x"}).json()
+    pid = p["id"]
+    try:
+        before = authed.get(f"{API}/credits/status").json()
+        r = authed.post(f"{API}/projects/{pid}/rewrite")
+        assert r.status_code == 200, r.text
+        after = authed.get(f"{API}/credits/status").json()
+        assert after["credits_available"] == before["credits_available"] - 3
+        assert after["credits_used"] == before["credits_used"] + 3
+
+        events = s.get(f"{API}/admin/credit-events")
+        assert events.status_code == 200
+        assert any(
+            e["user_id"] == user["id"]
+            and e["project_id"] == pid
+            and e["operation"] == "rewrite"
+            and e["credits_delta"] == -3
+            for e in events.json()
+        )
+    finally:
+        authed.delete(f"{API}/projects/{pid}")
+
+
+def test_insufficient_credits_blocks_generation_without_deduction(s):
+    _, token, user = _register_user(s, "insufficient")
+    authed = _authed_session(token)
+    dbh = _test_db_or_none()
+    if dbh is None:
+        pytest.skip("Direct MongoDB access required to adjust test wallet balance")
+    dbh.users.update_one({"id": user["id"]}, {"$set": {"credits": 2, "credits_used": 0}})
+
+    p = authed.post(f"{API}/projects", json={"title": "TEST_No_Credits", "idea": "x"}).json()
+    pid = p["id"]
+    try:
+        r = authed.post(f"{API}/projects/{pid}/rewrite")
+        assert r.status_code == 402
+        assert r.json()["detail"]["message"] == "Insufficient credits"
+        status = authed.get(f"{API}/credits/status").json()
+        assert status["credits_available"] == 2
+        assert status["credits_used"] == 0
+    finally:
+        authed.delete(f"{API}/projects/{pid}")
+
+
+def test_blocked_generation_does_not_deduct_credits(s):
+    _, token, user = _register_user(s, "failed-spend")
+    authed = _authed_session(token)
+    dbh = _test_db_or_none()
+    if dbh is None:
+        pytest.skip("Direct MongoDB access required to seed failed mock state")
+
+    p = authed.post(f"{API}/projects", json={"title": "TEST_Fail_No_Deduct", "idea": "x"}).json()
+    pid = p["id"]
+    try:
+        dbh.users.update_one({"id": user["id"]}, {"$set": {"credits": 250, "credits_used": 0}})
+        authed.post(f"{API}/projects/{pid}/rewrite")
+        authed.post(f"{API}/projects/{pid}/split-scenes")
+        scene_id = authed.get(f"{API}/projects/{pid}").json()["scenes"][0]["id"]
+        before = authed.get(f"{API}/credits/status").json()
+        # Drop credits under the image cost after prework. The guard should
+        # block before any generation or deduction occurs.
+        dbh.users.update_one({"id": user["id"]}, {"$set": {"credits": 1}})
+        r = authed.post(f"{API}/scenes/{scene_id}/generate-image")
+        assert r.status_code == 402
+        after = authed.get(f"{API}/credits/status").json()
+        assert after["credits_available"] == 1
+        assert after["credits_used"] == before["credits_used"]
+    finally:
+        authed.delete(f"{API}/projects/{pid}")
+
+
+def test_user_cannot_spend_another_users_credits(s):
+    _, token_a, user_a = _register_user(s, "spend-a")
+    _, token_b, user_b = _register_user(s, "spend-b")
+    a = _authed_session(token_a)
+    b = _authed_session(token_b)
+    p = a.post(f"{API}/projects", json={"title": "TEST_Private_Credits", "idea": "x"}).json()
+    pid = p["id"]
+    try:
+        assert b.post(f"{API}/projects/{pid}/rewrite").status_code == 404
+        a.post(f"{API}/projects/{pid}/rewrite")
+        status_a = a.get(f"{API}/credits/status").json()
+        status_b = b.get(f"{API}/credits/status").json()
+        assert status_a["user_id"] == user_a["id"]
+        assert status_a["credits_available"] == 247
+        assert status_b["user_id"] == user_b["id"]
+        assert status_b["credits_available"] == 250
+    finally:
+        a.delete(f"{API}/projects/{pid}")
 
 
 # ---------- Projects ----------
@@ -449,7 +625,14 @@ def test_export(s, project_id, scene_id):
 
 # ---------- Admin ----------
 def test_admin_endpoints(s):
-    for path in ["/admin/stats", "/admin/users", "/admin/projects", "/admin/generations", "/admin/failed-jobs"]:
+    for path in [
+        "/admin/stats",
+        "/admin/users",
+        "/admin/projects",
+        "/admin/generations",
+        "/admin/credit-events",
+        "/admin/failed-jobs",
+    ]:
         r = s.get(f"{API}{path}")
         assert r.status_code == 200, f"{path} failed"
     stats = s.get(f"{API}/admin/stats").json()
