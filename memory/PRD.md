@@ -39,8 +39,10 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 - MVP auth and project ownership are implemented with local demo compatibility.
 - Per-user credit balances and insufficient-credit blocking are implemented for
   generation actions.
-- Stripe test-mode readiness status exists, but checkout/session creation and
-  webhook credit fulfillment are not implemented yet.
+- Stripe test-mode readiness gate exists: `GET /api/billing/status`, a billing
+  config helper, disabled env placeholders, and Settings-page status. Stripe
+  SDK/network calls, checkout sessions, webhooks, live payments, and real
+  credentials are not implemented or committed.
 - Current backend suite has grown substantially since the MVP baseline; see later iteration notes for exact counts.
 
 ## P1 Completed
@@ -54,32 +56,41 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 - Current MVP status: mock-first workflow is mature; real LLM is gated and
   available for text operations; image/video/voice/music/export remain
   mock-only.
-- 100% MVP still requires Stripe checkout/session creation and webhook credit
-  fulfillment, real image generation, real video segments, real voice/music or
-  upload fallback, real FFmpeg export, durable object storage, deployment, and
-  end-to-end real media validation.
+- 100% MVP still requires production auth/user ownership hardening, a real
+  user-tied credit wallet with Stripe fulfillment, Stripe checkout/session
+  creation and webhooks, real image generation, real video segments, real
+  voice/music or upload fallback, real FFmpeg export, durable object storage,
+  deployment, and end-to-end real media validation.
 - Recommended build order:
-  1. Stripe test metering.
-  2. Real image provider.
-  3. Real video provider.
-  4. Real voice/music.
-  5. Real export.
-  6. Private beta.
+  1. Production auth/user ownership hardening.
+  2. Real credit wallet tied to users.
+  3. Stripe checkout/session creation and webhook credit fulfillment.
+  4. Real image provider.
+  5. Real video provider.
+  6. Real voice/music.
+  7. Real export.
+  8. Private beta.
 - Launch-ready criteria include working auth, credits, real LLM, real image,
   real video, MP4 export, storage, cost limits, admin monitoring, full passing
   tests, three successful sample episodes, and understood internal cost per
   1-minute video.
 
 ## Backlog (P2)
+- Production auth/user ownership hardening.
+- Real credit wallet tied to users and Stripe fulfillment.
 - Stripe checkout/session creation and webhooks.
 - Real Image provider.
 - Real Video provider.
 - Real Voice provider.
 - Real Music provider.
 - Real Export / FFmpeg worker.
+- Asset storage.
 - Public sharing.
 - Multi-tenant teams.
 - Versioned scene revisions.
+
+Auth and user ownership must come before real Stripe checkout/webhook work
+because billing and credit fulfillment need a reliable user owner.
 
 ## Iteration 25 (2026-05) — MVP auth and ownership
 - Added local email/password auth endpoints:
@@ -116,12 +127,15 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 - Added `GET /api/billing/status`, a safe billing readiness endpoint that only
   reports whether Stripe test-mode env vars are configured.
 - Added disabled-by-default billing env placeholders:
-  `STRIPE_TEST_MODE`, `STRIPE_SECRET_KEY`, `STRIPE_CREDIT_PRICE_ID`, and
-  `STRIPE_WEBHOOK_SECRET`.
+- `STRIPE_TEST_MODE=false`
+- `STRIPE_SECRET_KEY=`
+- `STRIPE_CREDIT_PRICE_ID=`
+- `STRIPE_WEBHOOK_SECRET=`
+- Added a side-effect-free billing config helper.
 - Added Settings-page visibility for Stripe test metering status.
 - Added side-effect-free billing config tests.
-- No checkout sessions, webhooks, live payments, real charges, or Stripe
-  network calls were added.
+- No Stripe SDK/network calls, checkout sessions, webhooks, live payments,
+  real charges, or real credentials were added.
 
 ## Iteration 2 (2026-02) — Workflow & Segment Model
 - Added persistent "Mock Mode: No real AI APIs connected yet" badge in top nav.
@@ -317,13 +331,15 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
   Deleted admin panel, background purge scheduler.
 
 ## Backlog (P2)
-- Auth.
-- Stripe metering.
+- Production auth/user ownership hardening.
+- Real credit wallet tied to users and Stripe fulfillment.
+- Stripe checkout/session creation and webhooks.
 - Real Image provider.
 - Real Video provider.
 - Real Voice provider.
 - Real Music provider.
 - Real Export / FFmpeg worker.
+- Asset storage.
 - Public sharing.
 - Multi-tenant teams.
 - Versioned scene revisions.
@@ -712,9 +728,11 @@ drag behavior for characters.
 ### Backlog after Iteration 24
 - P1 completed: Character drag handles in Cast view; Safe delete / Undo delete;
   Recently Deleted admin panel; Background purge scheduler.
-- P2 remaining: Auth; Stripe metering; Real Image provider; Real Video
-  provider; Real Voice provider; Real Music provider; Real Export / FFmpeg
-  worker; Public sharing; Multi-tenant teams; Versioned scene revisions.
+- P2 remaining has since moved on: production auth/user ownership hardening,
+  real credit wallet tied to users and Stripe fulfillment, Stripe checkout/
+  webhook work, real Image/Video/Voice/Music providers, Real Export/FFmpeg
+  worker, asset storage, Public sharing, Multi-tenant teams, and Versioned
+  scene revisions.
 
 
 ## Iteration 21 (2026-02) — Phase 2B: Real LLM provider (LLM modality only)

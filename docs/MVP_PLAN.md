@@ -39,8 +39,10 @@ Completed today:
 - Cost tracking: operation costs, project/scene estimates, wallet ring,
   high-cost scene warnings, trend deltas, reduce-to-draft, per-user credit
   balances, and insufficient-credit blocking for generation actions.
-- Billing readiness: Stripe test-mode status plumbing exists and remains
-  disabled until safe test env vars are configured.
+- Billing readiness: Stripe test-mode readiness gate, billing config helper,
+  `GET /api/billing/status`, Settings-page status display, and disabled env
+  placeholders exist. No Stripe SDK/network calls, checkout sessions, webhooks,
+  live payments, or real credentials are present.
 - Admin monitoring: stats, users, projects, generations, failed jobs, provider
   activity, provider health, and Recently Deleted.
 - Soft delete/restore: dashboard undo, restore endpoint, Admin Recently
@@ -88,6 +90,8 @@ Completed:
 
 Remaining:
 
+- [ ] Production auth/user ownership hardening before paid billing.
+- [ ] Real credit wallet tied to users and Stripe fulfillment.
 - [ ] Real image provider.
 - [ ] Real video provider.
 - [ ] Real voice provider.
@@ -118,9 +122,21 @@ Remaining:
 ### Phase 3: Stripe test metering
 
 - Completed: add disabled-by-default Stripe test-mode status gate.
+- Completed: add `GET /api/billing/status`.
+- Completed: add billing config helper.
+- Completed: add Settings-page Stripe test metering status.
+- Completed: add disabled env placeholders:
+  `STRIPE_TEST_MODE=false`, `STRIPE_SECRET_KEY=`,
+  `STRIPE_CREDIT_PRICE_ID=`, `STRIPE_WEBHOOK_SECRET=`.
 - Remaining: add checkout/session creation in test mode.
 - Remaining: add webhook credit fulfillment.
+- No Stripe SDK/network calls, real credentials, or checkout/webhook runtime
+  behavior are implemented yet.
 - Live payments remain disabled.
+
+Important roadmap note: production-grade auth/user ownership must be settled
+before real Stripe checkout and webhook work because billing and credit
+fulfillment need reliable user ownership.
 
 ### Phase 4: Real image provider
 

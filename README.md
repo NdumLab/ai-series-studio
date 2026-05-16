@@ -97,16 +97,18 @@ AUTH_DEMO_MODE=false
 
 ## Billing Status
 
-Stripe is scaffolded for test-mode readiness only. The app does not create
-checkout sessions, charge cards, or enable live payments yet.
+Stripe test-mode readiness gate is implemented. The app does not use the
+Stripe SDK, make Stripe network calls, create checkout sessions, handle
+webhooks, charge cards, or enable live payments yet.
 
 ```http
 GET /api/billing/status
 ```
 
-The status endpoint reports whether safe test-mode env vars are configured
-without returning secret values. Leave billing disabled locally unless you are
-explicitly testing Stripe:
+The billing config helper reports whether safe test-mode env vars are
+configured without returning secret values. The Settings page shows the Stripe
+test metering status. Leave billing disabled locally unless you are explicitly
+testing Stripe:
 
 ```bash
 STRIPE_TEST_MODE=false
@@ -114,6 +116,8 @@ STRIPE_SECRET_KEY=
 STRIPE_CREDIT_PRICE_ID=
 STRIPE_WEBHOOK_SECRET=
 ```
+
+No real credentials are committed.
 
 ## Prerequisites
 
@@ -280,25 +284,37 @@ REACT_APP_BACKEND_URL=http://localhost:8000 python -m pytest backend/tests/backe
 
 ## Backlog
 
-P1 completed:
+Completed:
 
+- Mock MVP workflow.
+- Creative Quality Engine.
+- Provider architecture.
+- Real LLM gated behind `USE_REAL_LLM_PROVIDER`.
 - Character drag handles in Cast view.
+- Scene and segment reorder.
 - Safe delete / Undo delete.
 - Recently Deleted admin panel.
 - Background purge scheduler.
+- Developer reproducibility.
+- Stripe test-mode readiness gate.
 
-P2 remaining:
+Still remaining before paid MVP:
 
-- Auth.
+- Production auth/user ownership hardening.
+- Real credit wallet tied to users and Stripe fulfillment.
 - Stripe checkout/session creation and webhooks.
 - Real Image provider.
 - Real Video provider.
 - Real Voice provider.
 - Real Music provider.
 - Real Export / FFmpeg worker.
+- Asset storage.
 - Public sharing.
 - Multi-tenant teams.
 - Versioned scene revisions.
+
+Auth and project ownership must stay ahead of real Stripe checkout/webhook work
+because billing and credits need a reliable user owner.
 
 ## Useful Paths
 
