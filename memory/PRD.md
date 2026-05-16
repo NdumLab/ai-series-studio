@@ -41,6 +41,27 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 - Recently Deleted admin panel.
 - Background purge scheduler.
 
+## MVP Roadmap
+- Canonical MVP completion plan: `docs/MVP_PLAN.md`.
+- Current MVP status: mock-first workflow is mature; real LLM is gated and
+  available for text operations; image/video/voice/music/export remain
+  mock-only.
+- 100% MVP requires auth/ownership, credit guardrails, real image generation,
+  real video segments, real voice/music or upload fallback, real FFmpeg export,
+  durable object storage, deployment, and end-to-end real media validation.
+- Recommended build order:
+  1. Auth and ownership.
+  2. Credit wallet and cost guardrails.
+  3. Real image provider.
+  4. Real video provider.
+  5. Real voice/music.
+  6. Real export.
+  7. Private beta.
+- Launch-ready criteria include working auth, credits, real LLM, real image,
+  real video, MP4 export, storage, cost limits, admin monitoring, full passing
+  tests, three successful sample episodes, and understood internal cost per
+  1-minute video.
+
 ## Backlog (P2)
 - Auth.
 - Stripe metering.
@@ -229,7 +250,7 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 - **Verification**:
   - Backend: 59/59 pytest cases pass (unchanged).
   - Frontend: production build OK (178.62 kB gzip), ESLint clean, all 8 tabs render with zero console errors (testing agent iteration_2).
-- **Character drag handles** officially **backlogged** (P1) per user — no scope creep this iteration.
+- **Character drag handles** were backlogged at this point; superseded by Iteration 24, where Cast drag handles shipped.
 - Mock-only invariants preserved; no real provider wiring, no API key fields, no Stripe.
 
 ## Backlog (P1) — refreshed
@@ -543,7 +564,7 @@ Stopped before Phase 2B real-LLM wiring per user. The next milestone is the **Em
 **Modified**: `backend/server.py` (delete/restore/purge endpoints + `_active_project_filter` + listing/get/update filters), `backend/tests/backend_test.py` (8 new tests, replaced the 3 old hard-cascade tests), `frontend/src/pages/Dashboard.jsx` (undo toast flow, AlertDialog removed), `frontend/src/lib/api.js` (Projects.restore added).
 
 ### Backlog (P1) — refreshed
-- Character drag handles in Cast view (still deferred).
+- Character drag handles in Cast view (completed later in Iteration 24).
 - Background scheduler for the 24h purge (currently manual `POST /api/admin/purge-deleted-projects`).
 - Real provider plug-ins for non-LLM modalities behind feature flags + at-rest secrets store.
 

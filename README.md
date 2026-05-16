@@ -10,6 +10,13 @@ The app is intentionally mock-first. Provider selection and provider activity
 plumbing exist, and real LLM execution is gated behind server-side flags and
 keys. Image, video, voice, music, and export providers remain mock-only.
 
+## MVP Plan
+
+The complete path to a 100% MVP is documented in
+[docs/MVP_PLAN.md](/home/ec2-user/ai-series-studio/docs/MVP_PLAN.md). It
+tracks what is already complete, what remains, build order, provider strategy,
+cost controls, testing strategy, launch criteria, and post-MVP scope.
+
 ## Current Product State
 
 - Story, scene, character, image, video segment, voice/music, provider, and
