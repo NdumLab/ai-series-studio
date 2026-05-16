@@ -249,7 +249,7 @@ function LLMModeBanner({ flags }) {
         </p>
         <p className="text-xs text-[#A1A1AA] mt-1">
           {enabled
-            ? "Story rewrite, improve-story, and prompt enhancements use the real LLM via the Emergent universal key. If the real call fails or times out, the mock fallback runs so workflows never break."
+            ? "Story rewrite, improve-story, and prompt enhancements use the configured server-side real LLM runtime. If the real call fails or times out, the mock fallback runs so workflows never break."
             : "Story rewrite, improve-story, and prompt enhancements run through the deterministic mock. Image, video, voice, music, and export remain mock-only regardless."}
         </p>
       </div>

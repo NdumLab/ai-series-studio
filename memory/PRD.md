@@ -1,42 +1,44 @@
 # AI Episode Studio — PRD
 
 ## Problem Statement
-Build a full-stack web MVP called AI Episode Studio that helps creators generate complete 1–3 minute AI story videos from characters, scenes, voice, music and short video clips. First version uses MOCK AI generation only (no real external APIs). Design the app so real providers can be added later for image, video, voice, music and FFmpeg export.
+Build a full-stack web MVP called AI Episode Studio that helps creators generate complete 1–3 minute AI story videos from characters, scenes, voice, music and short video clips. The product remains mock-first for image/video/voice/music/export. Real LLM execution exists for story and prompt text operations only, gated by server-side feature flags and key/runtime availability, with deterministic mock fallback.
 
 ## Architecture
 - Backend: FastAPI + MongoDB (relational-style schemas), all routes under `/api`
 - Frontend: React (CRA + craco) + Tailwind + shadcn/ui, dark cinematic theme (Outfit + IBM Plex Sans), red accent #FF3B30
 - No auth — single demo user `user-demo` seeded on startup
-- Mock generators return curated static URLs (Unsplash + Google sample mp4s) and log every generation
+- Provider architecture exists under `backend/providers/`; LLM is real-capable behind `USE_REAL_LLM_PROVIDER`, while image/video/voice/music/export remain mock-only by construction.
+- Mock generators return curated static URLs (Unsplash + Google sample mp4s) and log every generation/provider activity.
 
 ## Data Models (MongoDB collections)
 - users: id, name, email, role, credits, created_at
-- projects: id, user_id, title, idea, rewritten_story, status, created_at, updated_at
-- characters: id, project_id, name, description, voice_style, reference_image_url
-- scenes: id, project_id, order, title, duration, location, characters[], visual_prompt, dialogue, music_mood, camera_direction, voice, image_url, status
-- segments: id, scene_id, project_id, order, video_url, duration, status (pending/approved/rejected)
+- projects: id, user_id, title, idea, rewritten_story, status, provider override fields, optional soft-delete fields (`deleted_at`, `deleted_by`, `delete_expires_at`, `previous_status`), quality_scores, created_at, updated_at
+- characters: id, project_id, name, description, voice_style, voice_provider, voice_model, reference_image_url
+- scenes: id, project_id, order, title, duration, location, characters[], visual_prompt, raw/enhanced prompts, dialogue, music_mood, camera_direction, tension fields, voice, image_url, status
+- segments: id, scene_id, project_id, order, parent_segment_id, start_second, expand_mode, continuity_prompt, video_url, duration, status (pending/approved/rejected)
 - generations: id, user_id, project_id, type, cost_credits, status, error, created_at
+- provider_activity: safe provider metadata only (no prompts, outputs, or API keys)
 
 ## Costs (credits)
-rewrite 3 · split_scenes 4 · image 2 · video_segment 5 · voice 1
+rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2 · export 5
 
 ## Implemented (2026-02)
-- Projects CRUD, rewrite, split-into-6-scenes
+- Projects CRUD, soft delete, restore, 24h purge scheduler, rewrite, split-into-6-scenes
 - Scene CRUD with full field set (incl. dialogue, music_mood, camera_direction, voice, characters tags)
 - Character CRUD with placeholder portrait
 - Mock image generation (curated URL pool, 5% mock failure to populate admin failed jobs)
 - Mock 5s video segment generation, "Expand next 5s", approve/reject/regenerate
 - Cost estimator (POST /api/cost-estimate + GET /api/projects/{id}/cost-estimate)
 - Final Export page with stitched preview (mock final video URL)
-- Admin console: stats + users/projects/generations/failed jobs tables
-- 17/17 backend tests passing, frontend e2e flow validated
+- Admin console: stats + users/projects/generations/failed jobs/provider activity/provider health/recently deleted tables
+- Provider settings + per-project provider overrides; real LLM is gated and available for text operations, non-LLM modalities remain mock-only.
+- Current backend suite has grown substantially since the MVP baseline; see later iteration notes for exact counts.
 
 ## Backlog (P1)
-- Cascade-delete segments when project is deleted (orphan segments today)
-- Real provider plug-ins: image (fal.ai / Gemini Nano Banana), video (Sora 2), voice (ElevenLabs / OpenAI TTS), music (Suno-style), FFmpeg export worker
-- Per-character voice override on each scene
-- Drag-and-drop reorder of scenes & segments
-- Authentication (Emergent Google login or JWT)
+- Character drag handles in Cast view.
+- Real provider plug-ins for non-LLM modalities behind feature flags plus an at-rest secrets store: image (fal.ai / Gemini Nano Banana), video (Sora/Sora-like), voice (ElevenLabs / OpenAI TTS), music, FFmpeg/export worker.
+- API key inputs + storage remain locked until real-provider mode for those modalities is designed.
+- Authentication (Google login or JWT).
 
 ## Backlog (P2)
 - Public project sharing with watermark
@@ -225,20 +227,19 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 5 · voice 1
 
 ## Backlog (P1) — refreshed
 - Character drag handles in Cast view (deferred from iteration 12; requires `order` field on Character model + `PUT /api/projects/{id}/characters/reorder`).
-- **Safe delete / Undo delete** — replace hard cascade-delete with a recoverable flow:
-  1. Soft-delete first: add `deleted_at`, `deleted_by`, `delete_expires_at` to projects (and propagate hiding for child resources).
-  2. Hide soft-deleted projects from the dashboard list endpoint.
-  3. Frontend shows a 5-second toast with an **Undo** action.
-  4. Undo calls `POST /api/projects/{id}/restore` to revive the project + its scenes/characters/segments.
-  5. If no Undo arrives, a background cleanup job (or `DELETE /api/projects/{id}/purge`) performs the permanent cascade after `delete_expires_at`.
-  - Future endpoints: `DELETE /api/projects/{id}` → soft delete · `POST /api/projects/{id}/restore` → restore · `DELETE /api/projects/{id}/purge` → permanent delete.
-  - Out of scope today: frontend-only restore would be misleading because the data is truly gone — explicitly NOT shipped in iteration 15.
-- Real provider plug-ins behind feature flags: LLM, image, video, voice, music, export.
-- API key inputs + storage (locked until real-provider mode is activated).
+- Safe delete / Undo / Restore / 24h purge is now implemented:
+  `DELETE /api/projects/{id}` soft-deletes, `POST /api/projects/{id}/restore`
+  restores, `POST /api/admin/purge-deleted-projects` purges expired records,
+  and Admin has a **Recently Deleted** panel.
+- Provider architecture is now implemented, including provider resolution,
+  provider activity logs, guard/status endpoints, and LLM-only real execution.
+  Remaining provider backlog is limited to real non-LLM plug-ins.
+- Real provider plug-ins for non-LLM modalities behind feature flags + at-rest secrets store.
+- API key inputs + storage for non-LLM providers (locked until real-provider mode is activated).
 
 ## Backlog (P2)
 - Stripe metering + real credit purchases (replaces 250-credit mock wallet).
-- Authentication (Emergent Google login or JWT).
+- Authentication (Google login or JWT).
 - Public project sharing with watermark.
 - Multi-tenant teams with role-based admin.
 - Versioned scene revisions / undo.
@@ -388,7 +389,7 @@ Used pymongo directly to seed deterministic `provider_activity` rows tagged with
 ### Decision deferred to next milestone
 - **Phase 2B real provider implementation is intentionally NOT started.** The next milestone is the **secrets storage design** (per the user's instruction). Options to evaluate before implementation:
   1. Server-side encrypted secrets store with per-modality scoping (e.g. age/sops/sealed-box on disk, read-only at runtime).
-  2. Emergent-managed universal LLM key for LLM modality only (no additional infra).
+  2. Server-side LLM runtime key for LLM modality only (no additional infra).
   3. Per-tenant KMS once auth/multi-tenant is added (P2 backlog).
 
 
@@ -396,7 +397,7 @@ Used pymongo directly to seed deterministic `provider_activity` rows tagged with
 **Goal**: stop optimizing for "calling providers" and start optimizing for "great episodes." All scoring + enhancement is deterministic and rule-based today. Phase 2B will swap the rule-based mocks for real LLM-driven analysis behind feature flags.
 
 ### Secrets storage decision
-Per user: **option (b)** for the near term. Use the **Emergent universal LLM key for LLM modality only** when Phase 2B starts. Image / Video / Voice / Music / Export remain blocked until a proper at-rest-encrypted secrets store exists. No generic key storage will be implemented yet. Per-tenant KMS deferred until auth + multi-tenant lands.
+Per user: **option (b)** for the near term. Use a **server-side LLM runtime key for LLM modality only** when Phase 2B starts. Image / Video / Voice / Music / Export remain blocked until a proper at-rest-encrypted secrets store exists. No generic key storage will be implemented yet. Per-tenant KMS deferred until auth + multi-tenant lands.
 
 ### Backend — new module `/app/backend/creative_quality.py`
 Pure-logic, zero-network. Deterministic scoring + enhancement helpers:
@@ -588,7 +589,7 @@ Stopped before Phase 2B real-LLM wiring per user. The next milestone is the **Em
 **Goal**: ship the first real provider for AI Episode Studio. Strictly LLM-only. All other modalities remain permanently mock-pinned.
 
 ### What's real now
-- `story rewrite`, `improve story`, `enhance scene prompt (image-prompt | video-prompt | scene-drama | dialogue)` can now call the **real LLM** via the Emergent universal LLM key when `USE_REAL_LLM_PROVIDER=true`. Default flag is `false`.
+- `story rewrite`, `improve story`, `enhance scene prompt (image-prompt | video-prompt | scene-drama | dialogue)` can now call the **real LLM** via a configured server-side LLM runtime when `USE_REAL_LLM_PROVIDER=true`. Default flag is `false`.
 - Default model: `openai/gpt-5.2` (configurable via `LLM_REAL_PROVIDER` / `LLM_REAL_MODEL` env, falls back to whatever's resolved in global/project settings).
 - Real call timeout: 25s (`DEFAULT_TIMEOUT_S`). On timeout / exception / empty output → deterministic mock fallback runs and a second activity row is logged with `status="fallback"`.
 - Verified live: a real `openai/gpt-5.2` call returned `mode=real, status=success, duration_ms=108300` end-to-end (then flag flipped back to `false`).
@@ -649,4 +650,3 @@ Stopped before Phase 2B real-LLM wiring per user. The next milestone is the **Em
 - Production build: OK (27.59s).
 - Real LLM end-to-end test: ✅ verified live (gpt-5.2 round-trip with `mode=real, status=success`).
 - Defensive grep: only `llm_real.py` carries real-network code; no other modality has any http imports.
-

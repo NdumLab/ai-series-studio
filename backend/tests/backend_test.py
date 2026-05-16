@@ -2,17 +2,48 @@
 import json
 import os
 import time
+from pathlib import Path
 import pytest
 import requests
+from dotenv import load_dotenv
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://ai-episode-studio.preview.emergentagent.com").rstrip("/")
-API = f"{BASE_URL}/api"
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+load_dotenv(BACKEND_DIR / ".env", override=False)
+
+RAW_BACKEND_URL = os.environ.get(
+    "REACT_APP_BACKEND_URL",
+    "http://localhost:8000",
+).rstrip("/")
+
+# Accept either origin form (`http://localhost:8000`) or API-root form
+# (`http://localhost:8000/api`) so local test runs don't accidentally hit
+# `/api/api/*` and produce a wall of misleading 404/JSONDecodeError failures.
+if RAW_BACKEND_URL.endswith("/api"):
+    API = RAW_BACKEND_URL
+    BASE_URL = RAW_BACKEND_URL[:-4]
+else:
+    BASE_URL = RAW_BACKEND_URL
+    API = f"{BASE_URL}/api"
 
 
 @pytest.fixture(scope="session")
 def s():
     sess = requests.Session()
     sess.headers.update({"Content-Type": "application/json"})
+    try:
+        r = sess.get(f"{API}/", timeout=5)
+    except requests.RequestException as exc:
+        pytest.fail(
+            f"Backend API is not reachable at {API}. Start the FastAPI server "
+            f"or set REACT_APP_BACKEND_URL. Original error: {exc}"
+        )
+    if r.status_code != 200:
+        pytest.fail(
+            f"Expected AI Episode Studio API at {API}, got HTTP "
+            f"{r.status_code}: {r.text[:200]!r}. If your backend URL already "
+            "includes /api, pass that exact value; otherwise use the origin "
+            "such as http://localhost:8000."
+        )
     return sess
 
 
@@ -1639,8 +1670,12 @@ def _direct_db():
     Tests must clean up their seeded rows so they don't pollute neighbors.
     """
     from pymongo import MongoClient  # local import; only used in tests
-    from dotenv import load_dotenv as _ld
-    _ld("/app/backend/.env", override=True)
+
+    if not os.environ.get("MONGO_URL") or not os.environ.get("DB_NAME"):
+        pytest.skip(
+            "Direct MongoDB health tests require MONGO_URL and DB_NAME "
+            "in the environment or backend/.env"
+        )
     cli = MongoClient(os.environ["MONGO_URL"])
     return cli[os.environ["DB_NAME"]]
 

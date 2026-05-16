@@ -1,0 +1,4 @@
+# Optional real-LLM runtime used only when USE_REAL_LLM_PROVIDER=true.
+# This package may require private package-index access.
+-r requirements.txt
+emergentintegrations==0.1.0

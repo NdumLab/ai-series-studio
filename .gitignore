@@ -1,5 +1,3 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
 # IDE and editors
 .idea/
 .vscode/
@@ -30,10 +28,18 @@ next-env.d.ts
 dist/
 dist
 
-# Environment files (comprehensive coverage)
-
+# Environment and credential files
+.env
+.env.*
+*.env
+!backend/.env.example
+!frontend/.env.example
 *token.json*
 *credentials.json*
+credentials.json
+*.pem
+*.key
+.credentials
 
 # Logs and debug files
 npm-debug.log*
@@ -44,7 +50,6 @@ dump.rdb
 
 # System files
 .DS_Store
-*.pem
 
 # Python
 __pycache__/
@@ -75,53 +80,9 @@ agenthub/agents/youtube/db
 
 # Build caches
 .cache/
+frontend/node_modules/.cache/default-development/0.pack
 
 memory/test_credentials.md
 
 # Mobile development
-android-sdk/-e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
-frontend/node_modules/.cache/default-development/0.pack
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
+android-sdk/

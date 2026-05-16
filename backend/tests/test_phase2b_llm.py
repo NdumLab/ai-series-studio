@@ -99,6 +99,11 @@ def test_real_llm_fallback_when_real_raises(clean_env, monkeypatch, captured_act
     monkeypatch.setenv("USE_REAL_LLM_PROVIDER", "true")
     # Force a broken key so RealLLMProvider.run() raises during send_message().
     monkeypatch.setenv("EMERGENT_LLM_KEY", "definitely-not-a-real-key")
+    monkeypatch.setattr(
+        providers_pkg.executor,
+        "key_present_for_modality",
+        lambda modality, provider: modality == "llm",
+    )
 
     # Patch RealLLMProvider to raise — but only if it's actually reached
     # (when key_present_for_modality returns True). Since our broken key still
