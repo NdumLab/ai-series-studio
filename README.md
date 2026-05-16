@@ -17,6 +17,12 @@ The complete path to a 100% MVP is documented in
 tracks what is already complete, what remains, build order, provider strategy,
 cost controls, testing strategy, launch criteria, and post-MVP scope.
 
+Real image provider preparation is documented in
+[docs/IMAGE_PROVIDER_PLAN.md](/home/ec2-user/ai-series-studio/docs/IMAGE_PROVIDER_PLAN.md).
+The current recommendation is OpenAI `gpt-image-1` as the first MVP image
+provider after the secrets/storage gates are implemented. No real image
+provider is connected yet.
+
 ## Current Product State
 
 - Story, scene, character, image, video segment, voice/music, provider, and
@@ -39,6 +45,9 @@ cost controls, testing strategy, launch criteria, and post-MVP scope.
 - Real LLM support exists for text operations, gated behind
   `USE_REAL_LLM_PROVIDER`.
 - Image, video, voice, music, and export providers remain mock-only.
+- Real image generation remains blocked until `USE_REAL_IMAGE_PROVIDER=true`,
+  a server-side secret is available, credit/cost checks pass, and generated
+  image storage is ready.
 
 ## Reorder Endpoints
 

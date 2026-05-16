@@ -36,6 +36,8 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 - Final Export page with stitched preview (mock final video URL)
 - Admin console: stats + users/projects/generations/failed jobs/provider activity/provider health/recently deleted tables
 - Provider settings + per-project provider overrides; real LLM is gated and available for text operations, non-LLM modalities remain mock-only.
+- Real image provider planning and secrets gate are documented in
+  `docs/IMAGE_PROVIDER_PLAN.md`; no real image provider is connected yet.
 - Scene reorder, segment reorder, and character reorder are implemented.
 - MVP auth and project ownership are implemented with local demo compatibility.
 - Per-user credit balances, `GET /api/credits/status`, credit event logging,
@@ -182,6 +184,24 @@ because billing and credit fulfillment need a reliable user owner.
   config, and a Buy test credits button.
 - No live payments, card storage, API key inputs, real media providers, or real
   credentials were added.
+
+## Iteration 30 (2026-05) — Real image provider planning and secrets gate
+- Added `docs/IMAGE_PROVIDER_PLAN.md`.
+- Reviewed provider resolver, executor, feature flags, key-present logic,
+  provider activity logging, and credit guardrails.
+- Compared OpenAI `gpt-image-1`, Gemini Nano Banana family, and fal.ai image
+  models for quality, API complexity, cost model, speed, commercial fit,
+  character consistency, integration ease, and risk.
+- Recommended OpenAI `gpt-image-1` as the first MVP image provider because it
+  is the lowest-risk first integration for the current backend and provider
+  catalog.
+- Documented production secrets strategy: use AWS SSM Parameter Store
+  SecureString first, store only secret references in config, and never store
+  provider keys in MongoDB or frontend code.
+- Documented feature flag gates, credit rules, backend API shape, frontend UX,
+  storage gate, rollout plan, and tests needed.
+- No real image provider code, real image API calls, API key inputs, real media
+  providers, or secrets were added.
 
 ## Iteration 2 (2026-02) — Workflow & Segment Model
 - Added persistent "Mock Mode: No real AI APIs connected yet" badge in top nav.

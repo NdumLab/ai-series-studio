@@ -33,6 +33,10 @@ Completed today:
 - Provider architecture: provider catalog, global settings, per-project
   overrides, effective provider resolution, guard/status endpoints, provider
   activity logging, and provider health pulse.
+- Real image planning: first-provider recommendation, secrets gate, cost
+  controls, API design, storage gate, rollout plan, and tests are documented
+  in [`docs/IMAGE_PROVIDER_PLAN.md`](IMAGE_PROVIDER_PLAN.md). No real image
+  provider code is connected yet.
 - Real LLM gating: real LLM support exists for story/text operations behind
   `USE_REAL_LLM_PROVIDER`, with mock fallback.
 - Mock non-LLM providers: Image, Video, Voice, Music, and Export remain
@@ -90,6 +94,7 @@ Completed:
 - [x] Basic credit wallet and generation guardrails.
 - [x] Stripe test-mode readiness gate.
 - [x] Stripe test-mode checkout and webhook credit fulfillment.
+- [x] Real image provider integration plan and secrets gate.
 
 Remaining:
 
@@ -155,9 +160,14 @@ fulfillment need reliable user ownership.
 
 ### Phase 4: Real image provider
 
-- Add one real image provider first.
-- Generate character images.
-- Generate scene images.
+- Completed: real image provider plan and secrets gate.
+- Recommended first provider: OpenAI `gpt-image-1`.
+- Next implementation gate: add server-side secrets resolver with AWS SSM
+  Parameter Store SecureString support.
+- Then add one real image provider behind `USE_REAL_IMAGE_PROVIDER=true`,
+  server-side key presence, user credit checks, provider activity logging, and
+  storage controls.
+- Generate scene images first, then character images.
 - Keep video mocked.
 
 ### Phase 5: Real video provider
@@ -210,7 +220,8 @@ Required guardrails:
 ## G. Provider Strategy
 
 - LLM is already the first real provider.
-- Image comes next.
+- Image comes next. The first planned provider is OpenAI `gpt-image-1`; Gemini
+  Nano Banana should be evaluated second for character-consistency workflows.
 - Video comes after image quality is proven.
 - Voice/music/export come after core visual generation works.
 - Image/video/voice/music/export remain blocked until secrets storage is
