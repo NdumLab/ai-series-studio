@@ -2,8 +2,8 @@
 
 `execute_provider(...)` resolves the configured provider, checks feature flag
 and server-side key state, and dispatches to a real provider only for connected
-modalities. Today, LLM has its own `execute_llm(...)` path and image can run
-OpenAI GPT Image only when all guards pass. Video, voice, music, and export
+modalities. Today, LLM has its own `execute_llm(...)` path; image, video, and
+voice can run connected real providers when all guards pass. Music and export
 remain mock-only.
 """
 from __future__ import annotations
@@ -80,6 +80,12 @@ def _real_capable(modality: Modality, provider_name: Optional[str]) -> bool:
         except Exception:  # pragma: no cover
             return False
         return (provider_name or "").strip().lower() in LUMA_VIDEO_PROVIDER_IDS
+    if modality == "voice":
+        try:
+            from .voice_elevenlabs import ELEVENLABS_VOICE_PROVIDER_IDS
+        except Exception:  # pragma: no cover
+            return False
+        return (provider_name or "").strip().lower() in ELEVENLABS_VOICE_PROVIDER_IDS
     return False
 
 
@@ -232,6 +238,37 @@ async def execute_provider(
                 estimated_credits=estimated_credits,
                 error=exc.__class__.__name__,
                 message="Real video provider failed before request.",
+                meta=meta,
+            )
+            await _record(failed, 0, project_id, scene_id, segment_id)
+            return failed
+
+    if modality == "voice" and flag_on and has_key and _real_capable("voice", resolved["provider"]):
+        try:
+            from .voice_elevenlabs import ElevenLabsVoiceProvider
+            real_voice = ElevenLabsVoiceProvider(
+                provider_name=resolved["provider"],
+                model_name=resolved["model"],
+            )
+            real_res = await real_voice.run(**call_kwargs)
+            real_res.estimated_credits = estimated_credits
+            real_res.meta = {**meta, **real_res.meta}
+            await _record(
+                real_res,
+                int(real_res.meta.get("duration_ms") or 0),
+                project_id, scene_id, segment_id,
+            )
+            return real_res
+        except Exception as exc:  # pragma: no cover - provider returns failures itself
+            failed = ProviderResult(
+                modality="voice",
+                provider_name=resolved["provider"],
+                model_name=resolved["model"],
+                mode="real",
+                status=STATUS_FAILED,
+                estimated_credits=estimated_credits,
+                error=exc.__class__.__name__,
+                message="Real voice provider failed before request.",
                 meta=meta,
             )
             await _record(failed, 0, project_id, scene_id, segment_id)

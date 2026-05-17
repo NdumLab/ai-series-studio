@@ -223,6 +223,7 @@ MOCK_VIDEO_URLS = [
     "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
     "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
 ]
+MOCK_VOICE_AUDIO_URL = "https://interactive-examples.mdn.mozilla.net/media/cc0-audio/t-rex-roar.mp3"
 
 VOICE_OPTIONS = ["Narrator-Deep", "Narrator-Warm", "Hero-Bold", "Heroine-Calm", "Villain-Raspy", "Child-Bright"]
 MUSIC_MOODS = ["Cinematic", "Tense", "Uplifting", "Mysterious", "Romantic", "Action", "Melancholic"]
@@ -347,6 +348,11 @@ def video_guard_config() -> dict:
 
 def real_image_single_test_mode_enabled() -> bool:
     return os.environ.get("REAL_IMAGE_SINGLE_TEST_MODE", "true").strip().lower() != "false"
+
+
+def default_elevenlabs_voice_id() -> str:
+    """Backend-only ElevenLabs voice id used for controlled real voice tests."""
+    return os.environ.get("ELEVENLABS_DEFAULT_VOICE_ID", "").strip()
 
 
 def _wallet_state(pct: float) -> str:
@@ -606,6 +612,7 @@ def _browser_safe_asset_url(url: Optional[str]) -> Optional[str]:
 def _normalize_project_asset_urls(scenes: List[dict], characters: List[dict]) -> None:
     for scene in scenes:
         scene["image_url"] = _browser_safe_asset_url(scene.get("image_url"))
+        scene["voice_audio_url"] = _browser_safe_asset_url(scene.get("voice_audio_url"))
         for segment in scene.get("segments") or []:
             segment["video_url"] = _browser_safe_asset_url(segment.get("video_url"))
     for character in characters:
@@ -2251,6 +2258,56 @@ async def _store_generated_video_asset(
     return stored["url"]
 
 
+async def _store_generated_voice_asset(
+    *,
+    user: dict,
+    project_id: str,
+    scene_id: str,
+    provider_result,
+) -> str:
+    audio_bytes = (provider_result.output or {}).get("audio_bytes")
+    if not isinstance(audio_bytes, (bytes, bytearray)) or not audio_bytes:
+        raise HTTPException(502, "Real voice provider returned no audio data")
+    mime_type = (provider_result.output or {}).get("mime_type") or "audio/mpeg"
+    asset_id = new_id()
+    storage_key = make_storage_key(
+        user_id=user["id"],
+        project_id=project_id,
+        asset_type="voice_audio",
+        asset_id=asset_id,
+        mime_type=mime_type,
+    )
+    stored = storage_backend(ASSET_STORAGE_CONFIG).save_bytes(storage_key, bytes(audio_bytes))
+    asset_doc = asset_metadata(
+        asset_id=asset_id,
+        user_id=user["id"],
+        project_id=project_id,
+        scene_id=scene_id,
+        asset_type="voice_audio",
+        storage_backend_name=ASSET_STORAGE_CONFIG.backend,
+        storage_key=stored["storage_key"],
+        url=stored["url"],
+        mime_type=mime_type,
+        size_bytes=stored.get("size_bytes", 0),
+        provider_name=provider_result.provider_name,
+        provider_job_id=provider_result.provider_job_id,
+        created_at=now_iso(),
+    )
+    await db.assets.insert_one(asset_doc.copy())
+    return stored["url"]
+
+
+def _voice_text_for_scene(scene: dict) -> str:
+    dialogue = (scene.get("dialogue") or "").strip()
+    if dialogue:
+        return dialogue
+    parts = [
+        (scene.get("title") or "").strip(),
+        (scene.get("enhanced_video_prompt") or scene.get("visual_prompt") or "").strip(),
+    ]
+    return ". ".join(part for part in parts if part).strip()
+
+
 @api.post("/characters/{character_id}/generate-image")
 async def generate_character_image(character_id: str, user: dict = Depends(current_user)):
     character = await _owned_character(character_id, user)
@@ -2337,6 +2394,107 @@ async def generate_character_image(character_id: str, user: dict = Depends(curre
     )
     await log_generation("image", character["project_id"], cost, user_id=user["id"])
     return {"image_url": url, "reference_image_url": url, "cost": cost, "remaining_credits": remaining_credits}
+
+
+@api.post("/scenes/{scene_id}/generate-voice")
+async def generate_scene_voice(scene_id: str, user: dict = Depends(current_user)):
+    scene = await _owned_scene(scene_id, user)
+    project = await _owned_project(scene["project_id"], user)
+    cost = COSTS["voice"]
+    await _check_credits(user, cost, "voice")
+    voice_text = _voice_text_for_scene(scene)
+    if not voice_text:
+        raise HTTPException(400, "Voice text is empty")
+
+    global_settings = await _load_provider_settings()
+    snap = provider_status(modality="voice", project=project, global_settings=global_settings)
+    if snap.get("would_use_real_provider") and ASSET_STORAGE_CONFIG.backend != "local":
+        raise HTTPException(503, "Asset storage backend is not configured for real voice generation")
+    voice_id = default_elevenlabs_voice_id() if snap.get("would_use_real_provider") else (scene.get("voice") or "")
+    guard = await execute_provider(
+        modality="voice",
+        project=project,
+        global_settings=global_settings,
+        estimated_credits=cost,
+        project_id=scene["project_id"],
+        scene_id=scene_id,
+        text=voice_text,
+        voice_id=voice_id,
+    )
+    log.info("provider.voice mode=%s status=%s provider=%s/%s", guard.mode, guard.status, guard.provider_name, guard.model_name)
+    if guard.mode == "real":
+        if guard.status != STATUS_SUCCESS:
+            await log_generation(
+                "voice",
+                scene["project_id"],
+                0,
+                status="failed",
+                error=guard.error or guard.message or "real voice provider failed",
+                user_id=user["id"],
+            )
+            raise HTTPException(502, "Real voice provider failed")
+        voice_audio_url = await _store_generated_voice_asset(
+            user=user,
+            project_id=scene["project_id"],
+            scene_id=scene_id,
+            provider_result=guard,
+        )
+    else:
+        if guard.status == "blocked":
+            await log_generation(
+                "voice",
+                scene["project_id"],
+                0,
+                status="failed",
+                error=guard.message or "real voice provider blocked",
+                user_id=user["id"],
+            )
+            raise HTTPException(503, guard.message or "Real voice provider blocked")
+        voice_audio_url = MOCK_VOICE_AUDIO_URL
+        asset_id = new_id()
+        storage_key = make_storage_key(
+            user_id=user["id"],
+            project_id=scene["project_id"],
+            asset_type="voice_audio",
+            asset_id=asset_id,
+            mime_type="audio/mpeg",
+            source_name=voice_audio_url,
+        )
+        stored = storage_backend(ASSET_STORAGE_CONFIG).save_external_url(storage_key, voice_audio_url)
+        asset_doc = asset_metadata(
+            asset_id=asset_id,
+            user_id=user["id"],
+            project_id=scene["project_id"],
+            scene_id=scene_id,
+            asset_type="voice_audio",
+            storage_backend_name=ASSET_STORAGE_CONFIG.backend,
+            storage_key=stored["storage_key"],
+            url=stored["url"],
+            external_url=stored.get("external_url"),
+            mime_type="audio/mpeg",
+            size_bytes=stored.get("size_bytes", 0),
+            provider_name=guard.provider_name,
+            provider_job_id=guard.provider_job_id,
+            created_at=now_iso(),
+        )
+        await db.assets.insert_one(asset_doc.copy())
+
+    await db.scenes.update_one({"id": scene_id}, {"$set": {"voice_audio_url": voice_audio_url}})
+    remaining_credits = await _deduct_credits(
+        user,
+        cost,
+        "voice",
+        project_id=scene["project_id"],
+    )
+    await log_generation("voice", scene["project_id"], cost, user_id=user["id"])
+    return {
+        "voice_audio_url": voice_audio_url,
+        "cost": cost,
+        "remaining_credits": remaining_credits,
+        "mode": guard.mode,
+        "provider_name": guard.provider_name,
+        "model_name": guard.model_name,
+    }
 
 
 async def _create_scene_segment(

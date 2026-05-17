@@ -13,7 +13,10 @@ but it is disabled by default and cannot run without the image feature flag,
 server-side secrets, credit checks, and asset storage. Luma video support now
 exists behind disabled-by-default guards for 5-second segments, server-side
 SSM secrets, credit checks, duration caps, provider activity logging, and
-asset storage. Voice, music, and export providers remain mock-only.
+asset storage. ElevenLabs voice support exists behind disabled-by-default
+guards, server-side SSM secrets, a backend-only voice id, credit checks,
+provider activity logging, and generated audio asset storage. Music and export
+providers remain mock-only.
 
 ## MVP Plan
 
@@ -73,7 +76,16 @@ Controlled Luma staging/private-beta enablement steps are documented in
   controlled initial 5-second Luma generation and one controlled Expand Next 5
   Seconds generation have been validated; real video remains disabled by
   default after tests.
-- Voice, music, and export providers remain mock-only.
+- ElevenLabs voice support exists through
+  `backend/providers/voice_elevenlabs.py`, but real voice generation remains
+  disabled until `USE_REAL_VOICE_PROVIDER=true`, effective voice provider is
+  `elevenlabs`, a backend SSM secret exists at
+  `SSM_PROVIDER_KEY_PREFIX/voice/elevenlabs/api-key`, and
+  `ELEVENLABS_DEFAULT_VOICE_ID` is configured. `POST
+  /api/scenes/{scene_id}/generate-voice` stores successful audio as a
+  `voice_audio` asset and deducts credits only after storage succeeds. No
+  controlled real voice call has been run yet.
+- Music and export providers remain mock-only.
 - A backend-only secrets resolver foundation exists. It defaults to disabled
   mode and can later resolve provider API keys from AWS SSM Parameter Store
   `SecureString` without exposing secret values to MongoDB or the frontend.
@@ -164,6 +176,8 @@ VIDEO_REAL_MODEL=ray-2
 VIDEO_SEGMENT_SECONDS=5
 VIDEO_MAX_SEGMENTS_PER_SCENE=3
 VIDEO_MAX_PROJECT_SECONDS=60
+USE_REAL_VOICE_PROVIDER=false
+ELEVENLABS_DEFAULT_VOICE_ID=
 ```
 
 `AUTH_JWT_SECRET` and `AUTH_TOKEN_EXPIRES_MINUTES` are accepted only as

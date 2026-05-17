@@ -24,7 +24,8 @@ generation during the first activation pass.
 - Failed real video calls do not deduct credits.
 - Video provider status exposes selected provider/model, feature flag state,
   secrets backend, key presence, real capability, and ready/blocked/mock state.
-- Voice, music, and export providers remain mock-only.
+- ElevenLabs voice support exists behind disabled-by-default guards. Music and
+  export providers remain mock-only.
 - No frontend API key inputs exist.
 - Controlled real video activation has been validated for one initial
   5-second segment and one Expand Next 5 Seconds segment. Real video remains
@@ -125,7 +126,9 @@ The response must not include the secret value.
 - [ ] No bulk generation is enabled.
 - [ ] Provider Activity and credit event views are available to an admin
       tester.
-- [ ] Voice, music, and export remain mock-only.
+- [ ] Real voice remains disabled unless a separate voice activation runbook is
+      deliberately underway.
+- [ ] Music and export remain mock-only.
 - [ ] No frontend API key inputs are visible.
 
 ## Dry Readiness Pass Before Enabling
@@ -314,4 +317,4 @@ Expected rollback signal:
 5. Confirm no new real Luma provider activity rows are created after rollback.
 
 Rollback should not affect real LLM behavior, real image behavior, Stripe test
-mode, existing stored video assets, or mock voice/music/export behavior.
+mode, existing stored video assets, or voice/music/export behavior.

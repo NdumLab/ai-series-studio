@@ -53,9 +53,15 @@ Completed today:
   `USE_REAL_VIDEO_PROVIDER=true`, effective provider `luma`, backend-only SSM
   secret resolution, credit checks, scene/project duration caps, provider
   activity logging, and generated MP4 asset storage. It is disabled by default;
-  mock video generation remains the default path when any guard fails. Real
-  Luma video has not been activated yet.
-- Mock remaining non-LLM providers: Voice, Music, and Export remain mock-only.
+  mock video generation remains the default path when any guard fails.
+  Controlled real initial and Expand Next 5 Seconds Luma tests have been run,
+  and real video has been rolled back to disabled.
+- Real voice provider: ElevenLabs text-to-speech support exists behind
+  `USE_REAL_VOICE_PROVIDER=true`, effective provider `elevenlabs`,
+  backend-only SSM secret resolution, `ELEVENLABS_DEFAULT_VOICE_ID`, credit
+  checks, provider activity logging, and generated `voice_audio` asset storage.
+  It is disabled by default and has not had a controlled paid real voice call.
+- Mock remaining non-LLM providers: Music and Export remain mock-only.
 - Cost tracking: operation costs, project/scene estimates, wallet ring,
   high-cost scene warnings, trend deltas, reduce-to-draft, per-user credit
   balances, `GET /api/credits/status`, credit event logging, and
@@ -120,12 +126,12 @@ Completed:
 - [x] Real Luma video provider behind disabled-by-default guards.
 - [x] Luma video staging/private-beta runbook.
 - [x] Controlled real Luma initial segment and Expand Next 5 Seconds validation.
+- [x] Real ElevenLabs voice provider behind disabled-by-default guards.
 
 Remaining:
 
 - [x] Production auth/user ownership hardening before paid billing.
 - [ ] Real image staging rollout and private-beta enablement.
-- [ ] Real voice provider.
 - [ ] Real music/SFX provider.
 - [ ] Real FFmpeg export worker.
 - [ ] S3/R2 storage.
@@ -217,8 +223,9 @@ decision and are not enabled.
 
 ### Phase 6: Real voice/music
 
-- Add voice provider.
+- Completed: add ElevenLabs voice provider behind disabled-by-default guards.
 - Add music/SFX provider.
+- Run one controlled real voice call later after explicit approval.
 - Keep optional upload fallback.
 
 ### Phase 7: Real export

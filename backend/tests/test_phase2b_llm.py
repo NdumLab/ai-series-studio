@@ -5,7 +5,7 @@ Verifies:
  - Real LLM is blocked when the key/runtime is unavailable.
  - When real LLM raises, the executor falls back to the mock and records the
    failure in provider_activity.
- - Image/Video/Voice/Music/Export modalities can NEVER take the real path,
+ - Image/Video/Voice/Music/Export modalities block without server-side keys,
    even when their feature flag is on.
 """
 import asyncio
@@ -140,7 +140,7 @@ def test_real_llm_fallback_when_real_raises(clean_env, monkeypatch, captured_act
     assert "fallback" in statuses
 
 
-# ---------- Non-LLM modalities permanently mock-only ----------
+# ---------- Non-LLM modalities remain guarded when no server-side key exists ----------
 @pytest.mark.parametrize("modality,flag_env", [
     ("image",  "USE_REAL_IMAGE_PROVIDER"),
     ("video",  "USE_REAL_VIDEO_PROVIDER"),
@@ -148,19 +148,19 @@ def test_real_llm_fallback_when_real_raises(clean_env, monkeypatch, captured_act
     ("music",  "USE_REAL_MUSIC_PROVIDER"),
     ("export", "USE_REAL_EXPORT_PROVIDER"),
 ])
-def test_non_llm_modalities_never_run_real_even_with_flag_on(modality, flag_env, monkeypatch, captured_activity):
+def test_non_llm_modalities_block_without_key_even_with_flag_on(modality, flag_env, monkeypatch, captured_activity):
     monkeypatch.setenv(flag_env, "true")
     res = _run(execute_provider(
         modality=modality, project=None, global_settings=GLOBAL, estimated_credits=1,
     ))
     assert res.mode == "mock"
-    # No real call ever — even with flag on, key_present is False for non-LLM.
+    # No real call occurs — even with flag on, key_present is False.
     assert res.meta["key_present"] is False
     assert res.status == "blocked"
     # Provider status snapshot agrees.
     snap = provider_status(modality=modality, project=None, global_settings=GLOBAL)
     assert snap["mode"] == "mock"
-    assert snap["real_capable"] is False
+    assert snap["real_capable"] is (modality == "voice")
     assert snap["would_use_real_provider"] is False
 
 
