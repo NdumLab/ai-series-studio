@@ -1,6 +1,28 @@
 import axios from "axios";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+function runtimeBackendUrl() {
+  const configured = (process.env.REACT_APP_BACKEND_URL || "").trim().replace(/\/$/, "");
+  if (typeof window === "undefined") {
+    return configured || "http://localhost:8000";
+  }
+
+  const { protocol, hostname } = window.location;
+  const configuredHost = (() => {
+    try {
+      return configured ? new URL(configured).hostname : "";
+    } catch {
+      return "";
+    }
+  })();
+
+  if (configured && !["localhost", "127.0.0.1"].includes(configuredHost)) {
+    return configured;
+  }
+
+  return `${protocol}//${hostname}:8000`;
+}
+
+const BACKEND_URL = runtimeBackendUrl();
 export const API = `${BACKEND_URL}/api`;
 const TOKEN_KEY = "ai_episode_studio_token";
 

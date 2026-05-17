@@ -149,7 +149,7 @@ AWS_REGION=us-east-1
 SSM_PROVIDER_KEY_PREFIX=/ai-series-studio/providers
 ASSET_STORAGE_BACKEND=local
 ASSET_LOCAL_DIR=./generated_assets
-ASSET_PUBLIC_BASE_URL=http://localhost:8000/assets
+ASSET_PUBLIC_BASE_URL=/assets
 ASSET_S3_BUCKET=
 ASSET_S3_REGION=us-east-1
 ASSET_S3_PREFIX=ai-series-studio
@@ -158,7 +158,7 @@ USE_REAL_IMAGE_PROVIDER=false
 REAL_IMAGE_SINGLE_TEST_MODE=true
 USE_REAL_VIDEO_PROVIDER=false
 VIDEO_REAL_PROVIDER=luma
-VIDEO_REAL_MODEL=ray
+VIDEO_REAL_MODEL=ray-2
 VIDEO_SEGMENT_SECONDS=5
 VIDEO_MAX_SEGMENTS_PER_SCENE=3
 VIDEO_MAX_PROJECT_SECONDS=60
@@ -263,7 +263,7 @@ The default development values are:
 ```bash
 MONGO_URL=mongodb://localhost:27017
 DB_NAME=ai_episode_studio
-CORS_ORIGINS=http://localhost:3000
+CORS_ORIGINS=*
 ```
 
 Real LLM mode uses an optional runtime package that is not required for Codex
@@ -289,6 +289,29 @@ Health check:
 curl http://localhost:8000/api/
 ```
 
+### Backend systemd Service
+
+A production-style systemd unit is included at
+`deploy/systemd/ai-series-studio-backend.service`. It runs the backend from the
+repo checkout with the Python virtualenv at `backend/.venv` and reads runtime
+configuration from `backend/.env` through the app startup code.
+
+Install or update it on the host:
+
+```bash
+sudo cp deploy/systemd/ai-series-studio-backend.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now ai-series-studio-backend
+```
+
+Check status and logs:
+
+```bash
+systemctl status ai-series-studio-backend
+journalctl -u ai-series-studio-backend -f
+curl http://localhost:8000/api/
+```
+
 ## Frontend Setup
 
 This project uses Yarn. Do not generate `package-lock.json`.
@@ -306,7 +329,9 @@ cd frontend
 yarn start
 ```
 
-Open `http://localhost:3000`.
+Open `http://localhost:3000` locally, or `http://<current-host>:3000` from
+another machine. If `REACT_APP_BACKEND_URL` is blank or points at localhost,
+the browser uses its current hostname with backend port `8000`.
 
 ## Developer Commands
 
@@ -370,7 +395,10 @@ yarn lint
 yarn build
 ```
 
-The production build requires `REACT_APP_BACKEND_URL` in `frontend/.env`.
+`REACT_APP_BACKEND_URL` is optional. Leave it blank when the frontend and
+backend are served from the same changing host; the browser will use the
+current hostname with backend port `8000`. Set it only when the backend lives
+on a different stable origin.
 
 ## Remote Preview Test Mode
 

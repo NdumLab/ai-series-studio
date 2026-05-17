@@ -403,6 +403,14 @@ async def _record(
         "feature_flag_enabled": (res.meta or {}).get("feature_flag_enabled", False),
         "key_present": (res.meta or {}).get("key_present", False),
     }
+    for key in (
+        "provider_http_status",
+        "provider_error_message",
+        "endpoint",
+        "input_mode",
+    ):
+        if key in (res.meta or {}) and (res.meta or {}).get(key) is not None:
+            record[key] = (res.meta or {}).get(key)
     try:
         await _recorder(record)
     except Exception:  # pragma: no cover

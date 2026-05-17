@@ -10,7 +10,7 @@ generation during the first activation pass.
 ## What Is Already Implemented
 
 - `backend/providers/video_luma.py` implements the guarded Luma video provider.
-- The provider supports `provider_name=luma` and model selection such as `ray`.
+- The provider supports `provider_name=luma` and documented models such as `ray-2`.
 - Scene video generation can use `scene.image_url` for image-to-video when it
   exists.
 - If there is no scene image URL, the provider can fall back to text-to-video
@@ -38,7 +38,7 @@ AWS_REGION=us-east-1
 SSM_PROVIDER_KEY_PREFIX=/ai-series-studio/providers
 USE_REAL_VIDEO_PROVIDER=true
 VIDEO_REAL_PROVIDER=luma
-VIDEO_REAL_MODEL=ray
+VIDEO_REAL_MODEL=ray-2
 VIDEO_SEGMENT_SECONDS=5
 VIDEO_MAX_SEGMENTS_PER_SCENE=3
 VIDEO_MAX_PROJECT_SECONDS=60
@@ -72,10 +72,10 @@ browser storage, logs, or committed files.
 2. Ensure the backend instance role can read that SSM path with decryption.
 3. Set `SECRETS_BACKEND=ssm`.
 4. Set `USE_REAL_VIDEO_PROVIDER=true`.
-5. Set `VIDEO_REAL_PROVIDER=luma` and `VIDEO_REAL_MODEL=ray`.
+5. Set `VIDEO_REAL_PROVIDER=luma` and `VIDEO_REAL_MODEL=ray-2`.
 6. Keep `VIDEO_SEGMENT_SECONDS=5`.
 7. Restart the backend.
-8. In Settings or project provider overrides, select `luma` and model `ray` for
+8. In Settings or project provider overrides, select `luma` and model `ray-2` for
    video.
 
 ## Disable Real Video Mode Quickly
@@ -98,7 +98,7 @@ curl -H "Authorization: Bearer <token>" \
 Expected staging signal when configured:
 
 - `selected_provider=luma`
-- `selected_model=ray`
+- `selected_model=ray-2`
 - `feature_flag_enabled=true`
 - `secrets_backend=ssm`
 - `key_present=true`
@@ -141,7 +141,7 @@ curl -H "Authorization: Bearer <token>" \
 Expected dry signal:
 
 - `selected_provider=luma`
-- `selected_model=ray`
+- `selected_model=ray-2`
 - `feature_flag_enabled=false`
 - `would_use_real_provider=false`
 - `real_capable=true`
@@ -225,7 +225,7 @@ Expected success row:
 
 - `modality=video`
 - `provider_name=luma`
-- `model_name=ray`
+- `model_name=ray-2`
 - `mode=real`
 - `status=success`
 - `estimated_credits=12`

@@ -9,6 +9,7 @@ importing this module cannot make network calls.
 from __future__ import annotations
 
 import json
+import re
 import time
 import urllib.error
 import urllib.request
@@ -20,9 +21,12 @@ from .base import BaseProvider, ProviderResult, STATUS_FAILED, STATUS_SUCCESS
 
 
 LUMA_VIDEO_PROVIDER_IDS = {"luma"}
-DEFAULT_LUMA_MODEL = "ray"
+DEFAULT_LUMA_MODEL = "ray-2"
+LEGACY_LUMA_MODEL_ALIASES = {"ray": DEFAULT_LUMA_MODEL}
+SUPPORTED_LUMA_MODELS = {DEFAULT_LUMA_MODEL, "ray-flash-2"}
 DEFAULT_LUMA_TIMEOUT_SECONDS = 180
 DEFAULT_LUMA_POLL_INTERVAL_SECONDS = 3
+LUMA_CREATE_VIDEO_ENDPOINT = "create_video"
 
 
 class LumaVideoProvider(BaseProvider):
@@ -31,7 +35,7 @@ class LumaVideoProvider(BaseProvider):
     client_factory: Optional[Callable[[str], Any]] = None
 
     def __init__(self, provider_name: str, model_name: str) -> None:
-        super().__init__(provider_name, model_name or DEFAULT_LUMA_MODEL)
+        super().__init__(provider_name, _normalize_luma_model(model_name))
 
     def _client(self, api_key: str) -> Any:
         factory = type(self).client_factory
@@ -59,6 +63,15 @@ class LumaVideoProvider(BaseProvider):
         clean_prompt = (prompt or "").strip()
         if not clean_prompt:
             return self._failed(started, "Video prompt is empty.")
+        input_mode = "image-to-video" if (image_url or "").strip() else "text-to-video"
+        if self.model_name not in SUPPORTED_LUMA_MODELS:
+            return self._failed(
+                started,
+                f"Unsupported Luma video model: {self.model_name}",
+                endpoint=LUMA_CREATE_VIDEO_ENDPOINT,
+                input_mode=input_mode,
+            )
+        provider_job_id = None
         try:
             client = self._client(api_key)
             created = client.create_generation(
@@ -101,8 +114,10 @@ class LumaVideoProvider(BaseProvider):
                 meta={
                     "duration_ms": int((time.perf_counter() - started) * 1000),
                     "provider_status": _field(final, "state") or _field(final, "status") or "completed",
-                    "image_to_video": bool(image_url),
+                    "input_mode": input_mode,
+                    "image_to_video": input_mode == "image-to-video",
                     "expand_mode": expand_mode,
+                    "endpoint": LUMA_CREATE_VIDEO_ENDPOINT,
                 },
             )
         except TimeoutError as exc:
@@ -112,9 +127,36 @@ class LumaVideoProvider(BaseProvider):
                 model_name=self.model_name,
                 mode="real",
                 status="timeout",
+                provider_job_id=provider_job_id,
                 error=exc.__class__.__name__,
                 message="Real Luma video generation timed out.",
-                meta={"duration_ms": int((time.perf_counter() - started) * 1000), "expand_mode": expand_mode},
+                meta={
+                    "duration_ms": int((time.perf_counter() - started) * 1000),
+                    "expand_mode": expand_mode,
+                    "endpoint": LUMA_CREATE_VIDEO_ENDPOINT,
+                    "input_mode": input_mode,
+                    "provider_job_id": provider_job_id,
+                    "provider_error_message": _sanitize_message(str(exc)),
+                },
+            )
+        except LumaProviderError as exc:
+            return ProviderResult(
+                modality="video",
+                provider_name=self.provider_name,
+                model_name=self.model_name,
+                mode="real",
+                status=STATUS_FAILED,
+                provider_job_id=provider_job_id,
+                error=exc.__class__.__name__,
+                message="Real Luma video generation failed.",
+                meta={
+                    "duration_ms": int((time.perf_counter() - started) * 1000),
+                    "expand_mode": expand_mode,
+                    "endpoint": exc.endpoint or LUMA_CREATE_VIDEO_ENDPOINT,
+                    "input_mode": input_mode,
+                    "provider_http_status": exc.http_status,
+                    "provider_error_message": exc.safe_message,
+                },
             )
         except Exception as exc:  # noqa: BLE001
             return ProviderResult(
@@ -123,12 +165,26 @@ class LumaVideoProvider(BaseProvider):
                 model_name=self.model_name,
                 mode="real",
                 status=STATUS_FAILED,
+                provider_job_id=provider_job_id,
                 error=exc.__class__.__name__,
                 message="Real Luma video generation failed.",
-                meta={"duration_ms": int((time.perf_counter() - started) * 1000), "expand_mode": expand_mode},
+                meta={
+                    "duration_ms": int((time.perf_counter() - started) * 1000),
+                    "expand_mode": expand_mode,
+                    "endpoint": LUMA_CREATE_VIDEO_ENDPOINT,
+                    "input_mode": input_mode,
+                    "provider_error_message": _sanitize_message(str(exc)),
+                },
             )
 
-    def _failed(self, started: float, error: str) -> ProviderResult:
+    def _failed(
+        self,
+        started: float,
+        error: str,
+        *,
+        endpoint: Optional[str] = None,
+        input_mode: Optional[str] = None,
+    ) -> ProviderResult:
         return ProviderResult(
             modality="video",
             provider_name=self.provider_name,
@@ -137,7 +193,12 @@ class LumaVideoProvider(BaseProvider):
             status=STATUS_FAILED,
             error=error,
             message="Real Luma video provider failed before request.",
-            meta={"duration_ms": int((time.perf_counter() - started) * 1000)},
+            meta={
+                "duration_ms": int((time.perf_counter() - started) * 1000),
+                "endpoint": endpoint,
+                "input_mode": input_mode,
+                "provider_error_message": _sanitize_message(error),
+            },
         )
 
     def _poll_until_complete(
@@ -165,6 +226,7 @@ class _LumaHttpClient:
     def __init__(self, api_key: str) -> None:
         self.api_key = api_key
         self.base_url = "https://api.lumalabs.ai/dream-machine/v1/generations"
+        self.video_url = f"{self.base_url}/video"
 
     def create_generation(
         self,
@@ -188,17 +250,17 @@ class _LumaHttpClient:
             payload["extend_generation_id"] = parent_provider_job_id
         elif parent_video_url and expand_mode == "expand":
             payload["source_video_url"] = parent_video_url
-        return self._json_request("POST", self.base_url, payload)
+        return self._json_request("POST", self.video_url, payload, endpoint=LUMA_CREATE_VIDEO_ENDPOINT)
 
     def get_generation(self, provider_job_id: str) -> dict:
-        return self._json_request("GET", f"{self.base_url}/{provider_job_id}", None)
+        return self._json_request("GET", f"{self.base_url}/{provider_job_id}", None, endpoint="get_generation")
 
     def download_asset(self, video_url: str) -> bytes:
         request = urllib.request.Request(video_url, headers={"User-Agent": "ai-series-studio/1.0"})
         with urllib.request.urlopen(request, timeout=120) as response:  # noqa: S310 - provider asset URL
             return response.read()
 
-    def _json_request(self, method: str, url: str, payload: Optional[dict]) -> dict:
+    def _json_request(self, method: str, url: str, payload: Optional[dict], *, endpoint: str) -> dict:
         data = None if payload is None else json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
             url,
@@ -216,8 +278,25 @@ class _LumaHttpClient:
                 body = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"Luma HTTP {exc.code}: {body[:200]}") from exc
+            raise LumaProviderError(
+                http_status=exc.code,
+                message=body,
+                endpoint=endpoint,
+            ) from exc
         return json.loads(body or "{}")
+
+
+class LumaProviderError(RuntimeError):
+    def __init__(self, *, http_status: int, message: str, endpoint: str) -> None:
+        self.http_status = int(http_status)
+        self.endpoint = endpoint
+        self.safe_message = _sanitize_message(message)
+        super().__init__(f"Luma HTTP {self.http_status}: {self.safe_message}")
+
+
+def _normalize_luma_model(model_name: Optional[str]) -> str:
+    raw = (model_name or DEFAULT_LUMA_MODEL).strip().lower() or DEFAULT_LUMA_MODEL
+    return LEGACY_LUMA_MODEL_ALIASES.get(raw, raw)
 
 
 def _field(value: Any, name: str) -> Any:
@@ -236,3 +315,13 @@ def _extract_video_url(value: Any) -> Optional[str]:
             if assets.get(key):
                 return str(assets[key])
     return None
+
+
+def _sanitize_message(value: str, limit: int = 240) -> str:
+    text = " ".join((value or "").replace("\x00", "").split())
+    text = re.sub(r"Bearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [redacted]", text, flags=re.I)
+    text = re.sub(r"(api[_-]?key[\"'=:\s]+)[A-Za-z0-9._~+/=-]+", r"\1[redacted]", text, flags=re.I)
+    text = re.sub(r"sk-[A-Za-z0-9_-]+", "sk-[redacted]", text)
+    if len(text) > limit:
+        return f"{text[:limit]}..."
+    return text

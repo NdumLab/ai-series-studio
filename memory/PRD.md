@@ -156,7 +156,7 @@ provider activity logging.
   the current scene image -> 5-second segment -> Expand Next 5 Seconds model.
 - Documented required disabled-by-default envs:
   `USE_REAL_VIDEO_PROVIDER=false`, `VIDEO_REAL_PROVIDER=luma`,
-  `VIDEO_REAL_MODEL=ray`, `VIDEO_SEGMENT_SECONDS=5`,
+  `VIDEO_REAL_MODEL=ray-2`, `VIDEO_SEGMENT_SECONDS=5`,
   `VIDEO_MAX_SEGMENTS_PER_SCENE=3`, and `VIDEO_MAX_PROJECT_SECONDS=60`.
 - Documented SSM secret paths for Luma, Runway, OpenAI video, and fal.ai.
 - Documented credit rules, storage requirements, backend API design, frontend
@@ -167,7 +167,7 @@ provider activity logging.
 ## Iteration 36 (2026-05) — Video provider guard foundation
 - Added disabled-by-default video provider env placeholders to
   `backend/.env.example`: `USE_REAL_VIDEO_PROVIDER=false`,
-  `VIDEO_REAL_PROVIDER=luma`, `VIDEO_REAL_MODEL=ray`,
+  `VIDEO_REAL_PROVIDER=luma`, `VIDEO_REAL_MODEL=ray-2`,
   `VIDEO_SEGMENT_SECONDS=5`, `VIDEO_MAX_SEGMENTS_PER_SCENE=3`, and
   `VIDEO_MAX_PROJECT_SECONDS=60`.
 - Updated provider catalog/status readiness for `luma`, `runway`,
@@ -217,7 +217,7 @@ provider activity logging.
 ## Iteration 40 (2026-05) — Luma video dry staging readiness
 
 - Verified dry video status with `USE_REAL_VIDEO_PROVIDER=false`: effective
-  provider `luma/ray`, `real_capable=true`, `would_use_real_provider=false`,
+  provider `luma/ray-2`, `real_capable=true`, `would_use_real_provider=false`,
   `mode=mock`, and no real call possible.
 - Prepared a safe dry-readiness project with one scene, a served `image_url`,
   an `enhanced_video_prompt`, zero video segments, project video duration below

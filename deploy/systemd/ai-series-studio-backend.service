@@ -1,0 +1,21 @@
+[Unit]
+Description=AI Series Studio Backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/home/ec2-user/ai-series-studio/backend
+Environment=PYTHONUNBUFFERED=1
+Environment=CORS_ORIGINS=*
+Environment=ASSET_PUBLIC_BASE_URL=/assets
+ExecStart=/bin/bash -lc 'exec /home/ec2-user/ai-series-studio/backend/.venv/bin/python -m uvicorn server:app --host 0.0.0.0 --port 8000'
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target

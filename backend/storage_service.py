@@ -52,7 +52,7 @@ def storage_config(env: Optional[dict] = None, root_dir: Optional[Path] = None) 
     return AssetStorageConfig(
         backend=backend,
         local_dir=local_dir,
-        public_base_url=(source.get("ASSET_PUBLIC_BASE_URL") or "http://localhost:8000/assets").strip().rstrip("/"),
+        public_base_url=(source.get("ASSET_PUBLIC_BASE_URL") or "/assets").strip().rstrip("/"),
         s3_bucket=(source.get("ASSET_S3_BUCKET") or "").strip(),
         s3_region=(source.get("ASSET_S3_REGION") or "us-east-1").strip(),
         s3_prefix=(source.get("ASSET_S3_PREFIX") or "ai-series-studio").strip().strip("/"),

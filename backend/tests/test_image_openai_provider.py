@@ -288,7 +288,6 @@ def test_successful_real_image_asset_metadata_is_saved(monkeypatch, tmp_path):
     cfg = storage_config({
         "ASSET_STORAGE_BACKEND": "local",
         "ASSET_LOCAL_DIR": str(tmp_path),
-        "ASSET_PUBLIC_BASE_URL": "http://localhost:8000/assets",
     })
     monkeypatch.setattr(server, "ASSET_STORAGE_CONFIG", cfg)
     res = ProviderResult(
@@ -308,7 +307,7 @@ def test_successful_real_image_asset_metadata_is_saved(monkeypatch, tmp_path):
         provider_result=res,
     ))
 
-    assert url.startswith("http://localhost:8000/assets/user-1/project-1/scene_image/")
+    assert url.startswith("/assets/user-1/project-1/scene_image/")
     assert fake_assets.rows[0]["provider_name"] == "openai-image"
     assert fake_assets.rows[0]["asset_type"] == "scene_image"
     assert fake_assets.rows[0]["size_bytes"] == len(b"image-bytes")

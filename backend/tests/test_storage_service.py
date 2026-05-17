@@ -22,12 +22,11 @@ def test_local_storage_config_loads(tmp_path):
     cfg = storage_config({
         "ASSET_STORAGE_BACKEND": "local",
         "ASSET_LOCAL_DIR": str(tmp_path),
-        "ASSET_PUBLIC_BASE_URL": "http://localhost:8000/assets",
     })
 
     assert cfg.backend == "local"
     assert cfg.local_dir == tmp_path
-    assert cfg.public_base_url == "http://localhost:8000/assets"
+    assert cfg.public_base_url == "/assets"
     assert config_snapshot(cfg)["s3_configured"] is False
 
 
@@ -56,7 +55,6 @@ def test_local_save_asset_bytes_and_exists(tmp_path):
     cfg = storage_config({
         "ASSET_STORAGE_BACKEND": "local",
         "ASSET_LOCAL_DIR": str(tmp_path),
-        "ASSET_PUBLIC_BASE_URL": "http://localhost:8000/assets",
     })
     backend = LocalStorageBackend(cfg)
     key = "user/project/scene_image/test.png"
@@ -64,7 +62,7 @@ def test_local_save_asset_bytes_and_exists(tmp_path):
     saved = backend.save_bytes(key, b"image-bytes")
 
     assert saved["size_bytes"] == 11
-    assert saved["url"] == "http://localhost:8000/assets/user/project/scene_image/test.png"
+    assert saved["url"] == "/assets/user/project/scene_image/test.png"
     assert backend.exists(key) is True
     assert (tmp_path / key).read_bytes() == b"image-bytes"
     assert backend.delete(key) is True

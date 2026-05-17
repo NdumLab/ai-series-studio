@@ -31,7 +31,7 @@ GLOBAL = {
 
 GLOBAL_LUMA = {
     **GLOBAL,
-    "video": {"provider": "luma", "model": "ray"},
+    "video": {"provider": "luma", "model": "ray-2"},
 }
 
 
@@ -207,7 +207,7 @@ def test_provider_status_video_luma_ready_fields_when_flag_off(clean_env):
     snap = provider_status(modality="video", project=None, global_settings=GLOBAL_LUMA)
 
     assert snap["selected_provider"] == "luma"
-    assert snap["selected_model"] == "ray"
+    assert snap["selected_model"] == "ray-2"
     assert snap["feature_flag_enabled"] is False
     assert snap["secrets_backend"] == "disabled"
     assert snap["key_present"] is False

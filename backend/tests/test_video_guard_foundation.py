@@ -1,5 +1,6 @@
 """Unit tests for disabled-by-default video provider guard foundation."""
 import asyncio
+import urllib.error
 import os
 import sys
 from types import SimpleNamespace
@@ -13,7 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import server  # noqa: E402
 from providers import execute_provider, provider_status  # noqa: E402
 from providers import executor as provider_executor  # noqa: E402
-from providers.video_luma import LumaVideoProvider  # noqa: E402
+from providers.video_luma import LumaVideoProvider, _LumaHttpClient  # noqa: E402
 
 
 def _run(coro):
@@ -117,13 +118,30 @@ class _FakeDB:
                 "id": server.SETTINGS_DOC_ID,
                 "mock_mode": True,
                 **server.DEFAULT_PROVIDER_SETTINGS,
-                "video": {"provider": "luma", "model": "ray"},
+                "video": {"provider": "luma", "model": "ray-2"},
             }
         ])
         self.credit_events = _FakeCollection()
         self.generations = _FakeCollection()
         self.assets = _FakeCollection()
         self.provider_activity = _FakeCollection()
+
+
+class _FakeHTTPResponse:
+    def __init__(self, body):
+        self.body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def read(self):
+        return self.body
+
+    def close(self):
+        pass
 
 
 @pytest.fixture(autouse=True)
@@ -147,7 +165,7 @@ def clean_state(monkeypatch):
     LumaVideoProvider.client_factory = None
 
 
-GLOBAL_LUMA = {"video": {"provider": "luma", "model": "ray"}}
+GLOBAL_LUMA = {"video": {"provider": "luma", "model": "ray-2"}}
 GLOBAL_RUNWAY = {"video": {"provider": "runway", "model": "gen-4.5"}}
 
 
@@ -446,6 +464,175 @@ def test_successful_mocked_luma_video_saves_asset_and_updates_segment(monkeypatc
     assert fake_db.users.rows[0]["credits"] == 250 - server.COSTS["video_segment"]
 
 
+def test_luma_http_client_uses_documented_video_endpoint_and_payload(monkeypatch):
+    requests = []
+
+    def fake_urlopen(request, timeout):
+        requests.append((request, timeout))
+        assert request.full_url == "https://api.lumalabs.ai/dream-machine/v1/generations/video"
+        assert request.headers["Authorization"] == "Bearer test-key"
+        body = request.data.decode("utf-8")
+        assert '"model": "ray-2"' in body
+        assert '"duration": "5s"' in body
+        assert '"keyframes"' not in body
+        return _FakeHTTPResponse(b'{"id":"job-1","state":"queued"}')
+
+    monkeypatch.setattr("providers.video_luma.urllib.request.urlopen", fake_urlopen)
+
+    client = _LumaHttpClient("test-key")
+    out = client.create_generation(
+        model="ray-2",
+        prompt="Short safe prompt",
+        image_url=None,
+        duration_seconds=5,
+        expand_mode="initial",
+        parent_provider_job_id=None,
+        parent_video_url=None,
+    )
+
+    assert out["id"] == "job-1"
+    assert len(requests) == 1
+
+
+def test_luma_http_client_image_to_video_payload(monkeypatch):
+    def fake_urlopen(request, timeout):
+        payload = request.data.decode("utf-8")
+        assert '"keyframes": {"frame0": {"type": "image", "url": "https://assets.example/scene.png"}}' in payload
+        return _FakeHTTPResponse(b'{"id":"job-1"}')
+
+    monkeypatch.setattr("providers.video_luma.urllib.request.urlopen", fake_urlopen)
+
+    _LumaHttpClient("test-key").create_generation(
+        model="ray-2",
+        prompt="Short safe prompt",
+        image_url="https://assets.example/scene.png",
+        duration_seconds=5,
+        expand_mode="initial",
+        parent_provider_job_id=None,
+        parent_video_url=None,
+    )
+
+
+def test_luma_provider_polls_completed_downloads_bytes_and_normalizes_legacy_model(monkeypatch):
+    monkeypatch.setattr("providers.video_luma.get_provider_secret_value", lambda *_: "luma-secret")
+
+    class _FakeLumaClient:
+        def __init__(self):
+            self.polls = 0
+
+        def create_generation(self, **kwargs):
+            assert kwargs["model"] == "ray-2"
+            return {"id": "job-1"}
+
+        def get_generation(self, provider_job_id):
+            self.polls += 1
+            if self.polls == 1:
+                return {"id": provider_job_id, "state": "running"}
+            return {"id": provider_job_id, "state": "completed", "assets": {"video": "https://luma.example/out.mp4"}}
+
+        def download_asset(self, video_url):
+            assert video_url == "https://luma.example/out.mp4"
+            return b"mp4"
+
+    LumaVideoProvider.client_factory = lambda _api_key: _FakeLumaClient()
+
+    res = _run(LumaVideoProvider("luma", "ray").run(
+        prompt="Short safe prompt",
+        duration_seconds=5,
+        poll_interval_seconds=0,
+    ))
+
+    assert res.status == "success"
+    assert res.model_name == "ray-2"
+    assert res.provider_job_id == "job-1"
+    assert res.output["video_bytes"] == b"mp4"
+    assert res.meta["input_mode"] == "text-to-video"
+
+
+def test_luma_http_4xx_failure_is_sanitized(monkeypatch):
+    monkeypatch.setattr("providers.video_luma.get_provider_secret_value", lambda *_: "luma-secret")
+
+    def fake_urlopen(request, timeout):
+        raise urllib.error.HTTPError(
+            url=request.full_url,
+            code=400,
+            msg="Bad Request",
+            hdrs=None,
+            fp=_FakeHTTPResponse(b'{"error":"bad model","api_key":"sk-secret"}'),
+        )
+
+    monkeypatch.setattr("providers.video_luma.urllib.request.urlopen", fake_urlopen)
+    LumaVideoProvider.client_factory = lambda api_key: _LumaHttpClient(api_key)
+
+    res = _run(LumaVideoProvider("luma", "ray-2").run(prompt="Short safe prompt"))
+
+    assert res.status == "failed"
+    assert res.meta["provider_http_status"] == 400
+    assert res.meta["endpoint"] == "create_video"
+    assert res.meta["input_mode"] == "text-to-video"
+    assert "sk-secret" not in str(res.to_dict())
+
+
+def test_luma_provider_5xx_failure_metadata_is_sanitized(monkeypatch):
+    monkeypatch.setattr("providers.video_luma.get_provider_secret_value", lambda *_: "luma-secret")
+
+    class _FailingClient:
+        def create_generation(self, **kwargs):
+            from providers.video_luma import LumaProviderError
+
+            raise LumaProviderError(
+                http_status=503,
+                endpoint="create_video",
+                message='{"error":"temporary","Authorization":"Bearer secret-token"}',
+            )
+
+    LumaVideoProvider.client_factory = lambda _api_key: _FailingClient()
+
+    res = _run(LumaVideoProvider("luma", "ray-2").run(prompt="Short safe prompt"))
+
+    assert res.status == "failed"
+    assert res.meta["provider_http_status"] == 503
+    assert res.meta["endpoint"] == "create_video"
+    assert "secret-token" not in str(res.to_dict())
+
+
+def test_luma_timeout_has_safe_failure_metadata(monkeypatch):
+    monkeypatch.setattr("providers.video_luma.get_provider_secret_value", lambda *_: "luma-secret")
+
+    class _NeverCompletes:
+        def create_generation(self, **kwargs):
+            return {"id": "job-timeout"}
+
+        def get_generation(self, provider_job_id):
+            return {"id": provider_job_id, "state": "running"}
+
+    LumaVideoProvider.client_factory = lambda _api_key: _NeverCompletes()
+
+    res = _run(LumaVideoProvider("luma", "ray-2").run(
+        prompt="Short safe prompt",
+        timeout_seconds=1,
+        poll_interval_seconds=0,
+    ))
+
+    assert res.status == "timeout"
+    assert res.provider_job_id == "job-timeout"
+    assert res.meta["provider_job_id"] == "job-timeout"
+
+
+def test_luma_unsupported_model_fails_before_client(monkeypatch):
+    monkeypatch.setattr("providers.video_luma.get_provider_secret_value", lambda *_: "luma-secret")
+
+    def fail_factory(_api_key):
+        raise AssertionError("client should not be created for unsupported model")
+
+    LumaVideoProvider.client_factory = fail_factory
+
+    res = _run(LumaVideoProvider("luma", "not-a-model").run(prompt="Short safe prompt"))
+
+    assert res.status == "failed"
+    assert "Unsupported Luma video model" in res.error
+
+
 def test_failed_luma_provider_does_not_deduct_and_logs_activity(monkeypatch):
     monkeypatch.setenv("USE_REAL_VIDEO_PROVIDER", "true")
     monkeypatch.setattr(provider_executor, "key_present_for_modality", lambda *_: True)
@@ -476,4 +663,6 @@ def test_failed_luma_provider_does_not_deduct_and_logs_activity(monkeypatch):
     assert fake_db.provider_activity.rows[-1]["modality"] == "video"
     assert fake_db.provider_activity.rows[-1]["provider_name"] == "luma"
     assert fake_db.provider_activity.rows[-1]["status"] == "failed"
+    assert fake_db.provider_activity.rows[-1]["input_mode"] == "text-to-video"
+    assert fake_db.provider_activity.rows[-1]["provider_error_message"] == "provider unavailable"
     assert "luma-secret" not in str(fake_db.provider_activity.rows)

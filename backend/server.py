@@ -90,6 +90,7 @@ _PROVIDER_ACTIVITY_SAFE_FIELDS = {
     "modality", "provider_name", "model_name", "source", "mode", "status",
     "estimated_credits", "provider_job_id", "message", "error", "duration_ms",
     "project_id", "scene_id", "segment_id", "feature_flag_enabled", "key_present",
+    "provider_http_status", "provider_error_message", "endpoint", "input_mode",
 }
 
 
@@ -192,7 +193,7 @@ PROVIDER_CATALOG = {
         {"id": "custom", "label": "Custom image provider", "models": []},
     ],
     "video": [
-        {"id": "luma", "label": "Luma Ray / Dream Machine", "models": ["ray", "ray-2", "ray-flash-2"]},
+        {"id": "luma", "label": "Luma Ray / Dream Machine", "models": ["ray-2", "ray-flash-2"]},
         {"id": "runway", "label": "Runway Gen-4.5", "models": ["gen-4.5", "gen-4.5-turbo"]},
         {"id": "openai-video", "label": "OpenAI Sora", "models": ["sora-2", "sora-2-pro"]},
         {"id": "sora", "label": "Sora", "models": ["sora-2", "sora-2-pro"]},
@@ -295,7 +296,7 @@ DEFAULT_PROVIDER_SETTINGS = {
     "image": {"provider": "fal", "model": "flux-pro", "custom_provider": "", "custom_model": ""},
     "video": {
         "provider": os.environ.get("VIDEO_REAL_PROVIDER", "luma"),
-        "model": os.environ.get("VIDEO_REAL_MODEL", "ray"),
+        "model": os.environ.get("VIDEO_REAL_MODEL", "ray-2"),
         "custom_provider": "",
         "custom_model": "",
     },

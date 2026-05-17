@@ -913,7 +913,7 @@ def test_existing_routes_still_work_with_override(s):
             json={
                 "provider_override_enabled": True,
                 "image_provider": "fal", "image_model": "flux-pro",
-                "video_provider": "luma", "video_model": "ray",
+                "video_provider": "luma", "video_model": "ray-2",
             },
         )
         # Existing creative pipeline still functions on mocks
@@ -943,7 +943,7 @@ def test_effective_resolution_per_modality(s):
         json={
             "llm":    {"provider": "openai", "model": "gpt-5.2"},
             "image":  {"provider": "fal", "model": "flux-pro"},
-            "video":  {"provider": "luma", "model": "ray"},
+            "video":  {"provider": "luma", "model": "ray-2"},
             "voice":  {"provider": "elevenlabs", "model": "eleven-v3"},
             "music":  {"provider": "suno", "model": "v4"},
             "export": {"provider": "ffmpeg-local", "model": "ffmpeg-6"},
@@ -2058,6 +2058,7 @@ _SAFE_FIELDS = {
     "mode", "status", "estimated_credits", "provider_job_id", "message",
     "error", "duration_ms", "project_id", "scene_id", "segment_id",
     "feature_flag_enabled", "key_present",
+    "provider_http_status", "provider_error_message", "endpoint", "input_mode",
 }
 
 
