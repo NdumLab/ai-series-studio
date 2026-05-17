@@ -471,6 +471,8 @@ def test_luma_http_client_uses_documented_video_endpoint_and_payload(monkeypatch
         requests.append((request, timeout))
         assert request.full_url == "https://api.lumalabs.ai/dream-machine/v1/generations/video"
         assert request.headers["Authorization"] == "Bearer test-key"
+        assert "\n" not in request.headers["Authorization"]
+        assert '"' not in request.headers["Authorization"]
         body = request.data.decode("utf-8")
         assert '"model": "ray-2"' in body
         assert '"duration": "5s"' in body
@@ -479,7 +481,7 @@ def test_luma_http_client_uses_documented_video_endpoint_and_payload(monkeypatch
 
     monkeypatch.setattr("providers.video_luma.urllib.request.urlopen", fake_urlopen)
 
-    client = _LumaHttpClient("test-key")
+    client = _LumaHttpClient('  \n"test-key"\n  ')
     out = client.create_generation(
         model="ray-2",
         prompt="Short safe prompt",
@@ -568,9 +570,38 @@ def test_luma_http_4xx_failure_is_sanitized(monkeypatch):
 
     assert res.status == "failed"
     assert res.meta["provider_http_status"] == 400
+    assert res.meta["error_type"] == "provider_http_error"
     assert res.meta["endpoint"] == "create_video"
     assert res.meta["input_mode"] == "text-to-video"
     assert "sk-secret" not in str(res.to_dict())
+
+
+def test_luma_http_403_failure_has_auth_error_type_and_safe_body(monkeypatch):
+    monkeypatch.setattr("providers.video_luma.get_provider_secret_value", lambda *_: ' \n"luma-secret"\n ')
+
+    def fake_urlopen(request, timeout):
+        assert request.headers["Authorization"] == "Bearer luma-secret"
+        raise urllib.error.HTTPError(
+            url=request.full_url,
+            code=403,
+            msg="Forbidden",
+            hdrs=None,
+            fp=_FakeHTTPResponse(b'{"detail":"Not authenticated","api_key":"luma-secret"}'),
+        )
+
+    monkeypatch.setattr("providers.video_luma.urllib.request.urlopen", fake_urlopen)
+    LumaVideoProvider.client_factory = lambda api_key: _LumaHttpClient(api_key)
+
+    res = _run(LumaVideoProvider("luma", "").run(prompt="Short safe prompt"))
+
+    assert res.status == "failed"
+    assert res.model_name == "ray-2"
+    assert res.meta["provider_http_status"] == 403
+    assert res.meta["error_type"] == "provider_auth_failed"
+    assert res.meta["endpoint"] == "create_video"
+    assert res.meta["input_mode"] == "text-to-video"
+    assert "Not authenticated" in res.meta["provider_error_message"]
+    assert "luma-secret" not in str(res.to_dict())
 
 
 def test_luma_provider_5xx_failure_metadata_is_sanitized(monkeypatch):
@@ -665,4 +696,60 @@ def test_failed_luma_provider_does_not_deduct_and_logs_activity(monkeypatch):
     assert fake_db.provider_activity.rows[-1]["status"] == "failed"
     assert fake_db.provider_activity.rows[-1]["input_mode"] == "text-to-video"
     assert fake_db.provider_activity.rows[-1]["provider_error_message"] == "provider unavailable"
+    assert "luma-secret" not in str(fake_db.provider_activity.rows)
+
+
+def test_luma_403_does_not_deduct_create_asset_or_expose_key(monkeypatch):
+    monkeypatch.setenv("USE_REAL_VIDEO_PROVIDER", "true")
+    monkeypatch.setattr(provider_executor, "key_present_for_modality", lambda *_: True)
+    monkeypatch.setattr(provider_executor, "key_status_for_modality", lambda *_: "configured")
+    monkeypatch.setattr("providers.video_luma.get_provider_secret_value", lambda *_: ' \n"luma-secret"\n ')
+    fake_db = _FakeDB()
+    monkeypatch.setattr(server, "db", fake_db)
+
+    class _AuthFailingLumaClient:
+        def create_generation(self, **kwargs):
+            from providers.video_luma import LumaProviderError
+
+            raise LumaProviderError(
+                http_status=403,
+                endpoint="create_video",
+                message='{"detail":"Not authenticated","api_key":"luma-secret"}',
+            )
+
+    captured_keys = []
+
+    def client_factory(api_key):
+        captured_keys.append(api_key)
+        return _AuthFailingLumaClient()
+
+    LumaVideoProvider.client_factory = client_factory
+    server.set_activity_recorder(server._record_provider_activity)
+
+    with pytest.raises(server.HTTPException) as exc:
+        _run(server._create_scene_segment(
+            "scene-1",
+            expand_mode="initial",
+            continuity_prompt=None,
+            user={"id": "user-1"},
+        ))
+
+    assert exc.value.status_code == 502
+    assert captured_keys == ["luma-secret"]
+    assert fake_db.users.rows[0]["credits"] == 250
+    assert fake_db.users.rows[0]["credits_used"] == 0
+    assert fake_db.segments.rows == []
+    assert fake_db.assets.rows == []
+    assert fake_db.credit_events.rows == []
+    assert fake_db.generations.rows[-1]["status"] == "failed"
+    activity = fake_db.provider_activity.rows[-1]
+    assert activity["modality"] == "video"
+    assert activity["provider_name"] == "luma"
+    assert activity["mode"] == "real"
+    assert activity["status"] == "failed"
+    assert activity["provider_http_status"] == 403
+    assert activity["error_type"] == "provider_auth_failed"
+    assert activity["endpoint"] == "create_video"
+    assert activity["input_mode"] == "text-to-video"
+    assert "Not authenticated" in activity["provider_error_message"]
     assert "luma-secret" not in str(fake_db.provider_activity.rows)

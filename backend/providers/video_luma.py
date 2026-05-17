@@ -57,7 +57,7 @@ class LumaVideoProvider(BaseProvider):
         **_: Any,
     ) -> ProviderResult:
         started = time.perf_counter()
-        api_key = get_provider_secret_value("video", self.provider_name)
+        api_key = _normalize_api_key(get_provider_secret_value("video", self.provider_name))
         if not api_key:
             return self._failed(started, "Luma video provider secret is not configured.")
         clean_prompt = (prompt or "").strip()
@@ -140,6 +140,7 @@ class LumaVideoProvider(BaseProvider):
                 },
             )
         except LumaProviderError as exc:
+            error_type = "provider_auth_failed" if exc.http_status in {401, 403} else "provider_http_error"
             return ProviderResult(
                 modality="video",
                 provider_name=self.provider_name,
@@ -156,6 +157,7 @@ class LumaVideoProvider(BaseProvider):
                     "input_mode": input_mode,
                     "provider_http_status": exc.http_status,
                     "provider_error_message": exc.safe_message,
+                    "error_type": error_type,
                 },
             )
         except Exception as exc:  # noqa: BLE001
@@ -224,7 +226,7 @@ class LumaVideoProvider(BaseProvider):
 
 class _LumaHttpClient:
     def __init__(self, api_key: str) -> None:
-        self.api_key = api_key
+        self.api_key = _normalize_api_key(api_key)
         self.base_url = "https://api.lumalabs.ai/dream-machine/v1/generations"
         self.video_url = f"{self.base_url}/video"
 
@@ -297,6 +299,13 @@ class LumaProviderError(RuntimeError):
 def _normalize_luma_model(model_name: Optional[str]) -> str:
     raw = (model_name or DEFAULT_LUMA_MODEL).strip().lower() or DEFAULT_LUMA_MODEL
     return LEGACY_LUMA_MODEL_ALIASES.get(raw, raw)
+
+
+def _normalize_api_key(api_key: Optional[str]) -> str:
+    value = (api_key or "").strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1].strip()
+    return value
 
 
 def _field(value: Any, name: str) -> Any:

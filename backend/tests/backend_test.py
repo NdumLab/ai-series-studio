@@ -2058,7 +2058,7 @@ _SAFE_FIELDS = {
     "mode", "status", "estimated_credits", "provider_job_id", "message",
     "error", "duration_ms", "project_id", "scene_id", "segment_id",
     "feature_flag_enabled", "key_present",
-    "provider_http_status", "provider_error_message", "endpoint", "input_mode",
+    "provider_http_status", "provider_error_message", "error_type", "endpoint", "input_mode",
 }
 
 
@@ -2075,11 +2075,9 @@ def _assert_record_is_safe(rec):
         if isinstance(v, str):
             for needle in _SECRET_FORBIDDEN_SUBSTRINGS:
                 assert needle not in v, f"Secret-like substring '{needle}' found in {k}"
-    # 4. Modalities without connected real providers must not report a key.
-    # Image is real-capable now, so key_present=true is valid safe metadata for
-    # real image activity as long as no secret value is exposed.
-    if rec["modality"] in ("video", "voice", "music", "export"):
-        assert rec["key_present"] is False
+    # 4. key_present is safe boolean metadata. It may be true when a backend
+    # provider key exists; the secret value itself must never be exposed.
+    assert isinstance(rec.get("key_present"), bool)
 
 
 def test_provider_activity_endpoint_shape(s):

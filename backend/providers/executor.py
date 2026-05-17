@@ -406,6 +406,7 @@ async def _record(
     for key in (
         "provider_http_status",
         "provider_error_message",
+        "error_type",
         "endpoint",
         "input_mode",
     ):

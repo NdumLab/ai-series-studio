@@ -90,7 +90,7 @@ _PROVIDER_ACTIVITY_SAFE_FIELDS = {
     "modality", "provider_name", "model_name", "source", "mode", "status",
     "estimated_credits", "provider_job_id", "message", "error", "duration_ms",
     "project_id", "scene_id", "segment_id", "feature_flag_enabled", "key_present",
-    "provider_http_status", "provider_error_message", "endpoint", "input_mode",
+    "provider_http_status", "provider_error_message", "error_type", "endpoint", "input_mode",
 }
 
 
