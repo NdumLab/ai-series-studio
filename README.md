@@ -29,6 +29,9 @@ disabled by default.
 Controlled staging/private-beta enablement steps are documented in
 [docs/REAL_IMAGE_STAGING_RUNBOOK.md](/home/ec2-user/ai-series-studio/docs/REAL_IMAGE_STAGING_RUNBOOK.md).
 
+Real video provider planning is documented in
+[docs/VIDEO_PROVIDER_PLAN.md](/home/ec2-user/ai-series-studio/docs/VIDEO_PROVIDER_PLAN.md).
+
 ## Current Product State
 
 - Story, scene, character, image, video segment, voice/music, provider, and
@@ -396,6 +399,7 @@ Completed:
 - Generated asset storage foundation.
 - Real OpenAI image provider behind guards.
 - Real image staging/private-beta enablement runbook.
+- Real video provider integration plan.
 
 Still remaining before paid MVP:
 

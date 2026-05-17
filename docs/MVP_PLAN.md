@@ -108,6 +108,7 @@ Completed:
 - [x] Generated asset storage foundation.
 - [x] Real OpenAI image provider behind guards.
 - [x] Real image staging/private-beta enablement runbook.
+- [x] Real video provider guard design and implementation plan.
 
 Remaining:
 
@@ -188,8 +189,11 @@ decision and are not enabled.
 
 ### Phase 5: Real video provider
 
-- Next: plan one real video provider with the same feature flag, secrets,
-  credit, storage, and provider-activity guard pattern.
+- Completed: add [`docs/VIDEO_PROVIDER_PLAN.md`](VIDEO_PROVIDER_PLAN.md).
+- Recommended first provider: Luma Ray.
+- Next: implement one real video provider with feature flag, server-side SSM
+  secret, credit checks, asset storage, provider activity logging, mocked unit
+  tests, and disabled-by-default runtime behavior.
 - Start with 5-second segments.
 - Keep Expand Next 5 Seconds gated and cost-controlled.
 

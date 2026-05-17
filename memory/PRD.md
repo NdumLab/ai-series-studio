@@ -134,6 +134,24 @@ provider activity logging.
 - Reaffirmed that real OpenAI image remains disabled by default and video,
   voice, music, and export remain mock-only.
 
+## Iteration 35 (2026-05) — Real video provider planning
+- Added `docs/VIDEO_PROVIDER_PLAN.md`.
+- Compared Luma, Runway, Sora/OpenAI video, and fal.ai-hosted video models for
+  API maturity, image-to-video support, extension support, 5-second clips, cost,
+  speed, quality, commercial suitability, integration ease, and failure/retry
+  behavior.
+- Recommended Luma Ray as the first MVP video provider because it best matches
+  the current scene image -> 5-second segment -> Expand Next 5 Seconds model.
+- Documented required disabled-by-default envs:
+  `USE_REAL_VIDEO_PROVIDER=false`, `VIDEO_REAL_PROVIDER=`,
+  `VIDEO_REAL_MODEL=`, `VIDEO_SEGMENT_SECONDS=5`,
+  `VIDEO_MAX_SEGMENTS_PER_SCENE=3`, and `VIDEO_MAX_PROJECT_SECONDS=60`.
+- Documented SSM secret paths for Luma, Runway, OpenAI video, and fal.ai.
+- Documented credit rules, storage requirements, backend API design, frontend
+  UX, tests, rollback, and private beta plan.
+- No real video code, real video API calls, API key inputs, Stripe changes,
+  real LLM changes, or real image behavior changes were added.
+
 ## Auth Plan
 - `docs/AUTH_PLAN.md` compares Emergent Google login, custom JWT auth, and
   future multi-tenant team support.

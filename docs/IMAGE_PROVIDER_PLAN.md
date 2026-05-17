@@ -328,6 +328,9 @@ Frontend tests/checks:
 
 Operational staging details live in
 [`docs/REAL_IMAGE_STAGING_RUNBOOK.md`](REAL_IMAGE_STAGING_RUNBOOK.md).
+Real video planning lives in
+[`docs/VIDEO_PROVIDER_PLAN.md`](VIDEO_PROVIDER_PLAN.md); video remains
+mock-only.
 
 ## Non-Goals Still In Force
 
