@@ -193,8 +193,37 @@ payloads, or unfiltered provider metadata to the frontend.
 
 ## Storage Gate
 
-Do not rely on temporary provider URLs for launch. Before real image is enabled,
-choose one:
+Current implementation status:
+
+- `backend/storage_service.py` exists.
+- `ASSET_STORAGE_BACKEND=local` is the default development mode.
+- Local files are served through `GET /assets/{path}` by FastAPI when local
+  mode is active.
+- Mock image generation creates an `assets` metadata record for the selected
+  external mock URL without downloading remote content.
+- S3/R2 backend classes exist as explicit stubs and do not require credentials
+  yet.
+- Raw binary data is not stored in MongoDB.
+
+Asset records use the `assets` collection with:
+
+- `id`
+- `user_id`
+- `project_id`
+- optional `scene_id`
+- optional `segment_id`
+- `asset_type`
+- `storage_backend`
+- `storage_key`
+- `url`
+- `mime_type`
+- `size_bytes`
+- `provider_name`
+- `provider_job_id`
+- `created_at`
+
+Do not rely on temporary provider URLs for launch. Before broad real image
+enablement, choose one:
 
 - Local development: store mock/real test output under a local dev asset path.
 - Production: store generated images in S3 or R2 and save only durable asset

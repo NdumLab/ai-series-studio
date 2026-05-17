@@ -51,6 +51,10 @@ provider is connected yet.
 - A backend-only secrets resolver foundation exists. It defaults to disabled
   mode and can later resolve provider API keys from AWS SSM Parameter Store
   `SecureString` without exposing secret values to MongoDB or the frontend.
+- A generated asset storage abstraction exists. Local storage is the default,
+  FastAPI can serve local generated assets from `/assets`, and S3/R2 remain
+  planned production backends. Mock image generation records asset metadata but
+  does not download remote mock files.
 
 ## Reorder Endpoints
 
@@ -115,6 +119,13 @@ PASSWORD_MIN_LENGTH=8
 SECRETS_BACKEND=disabled
 AWS_REGION=us-east-1
 SSM_PROVIDER_KEY_PREFIX=/ai-series-studio/providers
+ASSET_STORAGE_BACKEND=local
+ASSET_LOCAL_DIR=./generated_assets
+ASSET_PUBLIC_BASE_URL=http://localhost:8000/assets
+ASSET_S3_BUCKET=
+ASSET_S3_REGION=us-east-1
+ASSET_S3_PREFIX=ai-series-studio
+ASSET_SIGNED_URL_EXPIRE_SECONDS=3600
 ```
 
 `AUTH_JWT_SECRET` and `AUTH_TOKEN_EXPIRES_MINUTES` are accepted only as

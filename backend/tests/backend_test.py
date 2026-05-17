@@ -1977,6 +1977,7 @@ def test_provider_status_endpoint_rejects_unknown_modality(s):
 
 def test_existing_image_generation_still_works_with_guard(s, project_id):
     """Smoke-check the existing /generate-image endpoint after the guard was wired in."""
+    dbh = _test_db_or_none()
     proj = s.get(f"{API}/projects/{project_id}").json()
     if not proj.get("scenes"):
         # Make sure scenes exist (in case the fixture ordering changed)
@@ -1989,6 +1990,12 @@ def test_existing_image_generation_still_works_with_guard(s, project_id):
     body = r.json()
     assert "image_url" in body
     assert body["cost"] == 2
+    if dbh is not None:
+        assert dbh.assets.count_documents({
+            "project_id": project_id,
+            "scene_id": scene_id,
+            "asset_type": "scene_image",
+        }) >= 1
 
 
 

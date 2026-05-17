@@ -41,6 +41,9 @@ Completed today:
   and AWS SSM SecureString lookup support. Non-LLM providers remain blocked
   unless a server-side secret is configured and a future real provider is
   explicitly connected.
+- Asset storage foundation: backend storage abstraction exists with local
+  storage/default asset metadata records and S3/R2 stubs. Mock image generation
+  records generated asset metadata without enabling real image calls.
 - Real LLM gating: real LLM support exists for story/text operations behind
   `USE_REAL_LLM_PROVIDER`, with mock fallback.
 - Mock non-LLM providers: Image, Video, Voice, Music, and Export remain
@@ -100,6 +103,7 @@ Completed:
 - [x] Stripe test-mode checkout and webhook credit fulfillment.
 - [x] Real image provider integration plan and secrets gate.
 - [x] Server-side secrets resolver foundation.
+- [x] Generated asset storage foundation.
 
 Remaining:
 
@@ -169,8 +173,9 @@ fulfillment need reliable user ownership.
 - Recommended first provider: OpenAI `gpt-image-1`.
 - Completed: add server-side secrets resolver with AWS SSM Parameter Store
   SecureString support.
-- Next implementation gate: add image storage abstraction before enabling
-  durable real image output.
+- Completed: add generated asset storage abstraction and asset metadata records.
+- Next implementation gate: implement real image provider behind mocks/tests,
+  still disabled by default.
 - Then add one real image provider behind `USE_REAL_IMAGE_PROVIDER=true`,
   server-side key presence, user credit checks, provider activity logging, and
   storage controls.

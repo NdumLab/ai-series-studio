@@ -40,6 +40,8 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
   `docs/IMAGE_PROVIDER_PLAN.md`; no real image provider is connected yet.
 - Backend-only provider secrets resolver exists with disabled mode and AWS SSM
   SecureString lookup support; non-LLM providers remain blocked by default.
+- Generated asset storage abstraction exists with local storage default, local
+  `/assets` serving, asset metadata records, and S3/R2 future stubs.
 - Scene reorder, segment reorder, and character reorder are implemented.
 - MVP auth and project ownership are implemented with local demo compatibility.
 - Per-user credit balances, `GET /api/credits/status`, credit event logging,
@@ -219,6 +221,21 @@ because billing and credit fulfillment need a reliable user owner.
   returning secret values.
 - No frontend API key inputs, real image provider code, real media calls,
   Stripe changes, or real LLM changes were added.
+
+## Iteration 32 (2026-05) — Generated asset storage foundation
+- Added `backend/storage_service.py`.
+- Default `ASSET_STORAGE_BACKEND=local` supports safe storage keys, local file
+  writes, URL generation, existence checks, and deletion.
+- FastAPI serves local generated assets at `/assets` in local mode.
+- Added S3/R2 backend stubs without requiring AWS credentials.
+- Added `assets` metadata record shape for generated assets; raw binary data is
+  not stored in MongoDB.
+- Mock scene image generation now creates an asset metadata record for the
+  selected external mock URL while preserving the existing `image_url` response.
+- Purge flow deletes asset metadata for purged projects; future local/S3 object
+  cleanup can build on the storage key/user/project layout.
+- No real image provider, real media calls, API key inputs, Stripe changes, or
+  real LLM changes were added.
 
 ## Iteration 2 (2026-02) — Workflow & Segment Model
 - Added persistent "Mock Mode: No real AI APIs connected yet" badge in top nav.

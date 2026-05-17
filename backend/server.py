@@ -1,6 +1,7 @@
 """AI Episode Studio - MVP backend (mock generation, no external APIs)."""
 from fastapi import FastAPI, APIRouter, Depends, Header, HTTPException, Request
 from dotenv import load_dotenv
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
@@ -67,6 +68,18 @@ from auth_utils import (  # noqa: E402
 )
 from billing_utils import stripe_test_config  # noqa: E402
 from credit_utils import wallet_pct, wallet_state  # noqa: E402
+from storage_service import (  # noqa: E402
+    asset_metadata,
+    make_storage_key,
+    storage_backend,
+    storage_config,
+)
+
+
+ASSET_STORAGE_CONFIG = storage_config(root_dir=ROOT_DIR)
+if ASSET_STORAGE_CONFIG.backend == "local":
+    ASSET_STORAGE_CONFIG.local_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/assets", StaticFiles(directory=str(ASSET_STORAGE_CONFIG.local_dir)), name="assets")
 
 
 # Activity recorder — writes safe metadata to the `provider_activity` collection.
@@ -1922,6 +1935,33 @@ async def generate_image(scene_id: str, user: dict = Depends(current_user)):
         await log_generation("image", scene["project_id"], 0, status="failed", error="mock provider timeout", user_id=user["id"])
         raise HTTPException(503, "Mock image provider timed out")
     url = random.choice(MOCK_SCENE_IMAGES)
+    asset_id = new_id()
+    storage_key = make_storage_key(
+        user_id=user["id"],
+        project_id=scene["project_id"],
+        asset_type="scene_image",
+        asset_id=asset_id,
+        mime_type="image/png",
+        source_name=url,
+    )
+    stored = storage_backend(ASSET_STORAGE_CONFIG).save_external_url(storage_key, url)
+    asset_doc = asset_metadata(
+        asset_id=asset_id,
+        user_id=user["id"],
+        project_id=scene["project_id"],
+        scene_id=scene_id,
+        asset_type="scene_image",
+        storage_backend_name=ASSET_STORAGE_CONFIG.backend,
+        storage_key=stored["storage_key"],
+        url=stored["url"],
+        external_url=stored.get("external_url"),
+        mime_type="image/png",
+        size_bytes=stored.get("size_bytes", 0),
+        provider_name=guard.provider_name,
+        provider_job_id=guard.provider_job_id,
+        created_at=now_iso(),
+    )
+    await db.assets.insert_one(asset_doc.copy())
     await db.scenes.update_one({"id": scene_id}, {"$set": {"image_url": url, "status": "image_ready"}})
     remaining_credits = await _deduct_credits(
         user,
@@ -2323,6 +2363,7 @@ async def _purge_expired_projects_now() -> dict:
     chars_res = await db.characters.delete_many({"project_id": {"$in": project_ids}})
     segs_res = await db.segments.delete_many({"project_id": {"$in": project_ids}})
     await db.provider_activity.delete_many({"project_id": {"$in": project_ids}})
+    await db.assets.delete_many({"project_id": {"$in": project_ids}})
     return {
         "projects": proj_res.deleted_count,
         "scenes": scenes_res.deleted_count,
