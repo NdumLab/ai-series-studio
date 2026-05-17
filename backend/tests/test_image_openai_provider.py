@@ -208,6 +208,80 @@ class _FindOneCollection(_InsertCollection):
         return next((row for row in self.rows if self._matches(row, query)), None)
 
 
+class _FakeCursor:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def sort(self, key, direction):
+        self.rows = sorted(self.rows, key=lambda row: row.get(key, ""))
+        return self
+
+    async def to_list(self, limit):
+        return [row.copy() for row in self.rows[:limit]]
+
+
+class _MutableCollection(_FindOneCollection):
+    def find(self, query, projection=None):
+        return _FakeCursor([row for row in self.rows if self._matches(row, query)])
+
+    async def update_one(self, query, update, upsert=False):
+        row = next((row for row in self.rows if self._matches(row, query)), None)
+        if row is None:
+            if upsert:
+                row = {k: v for k, v in query.items() if not isinstance(v, dict)}
+                self.rows.append(row)
+            else:
+                return SimpleNamespace(matched_count=0, modified_count=0)
+        for key, value in (update.get("$set") or {}).items():
+            row[key] = value
+        for key, value in (update.get("$inc") or {}).items():
+            row[key] = row.get(key, 0) + value
+        return SimpleNamespace(matched_count=1, modified_count=1)
+
+    def _matches(self, row, query):
+        for key, value in query.items():
+            if key == "$and":
+                if not all(self._matches(row, part) for part in value):
+                    return False
+                continue
+            if key == "$or":
+                if not any(self._matches(row, part) for part in value):
+                    return False
+                continue
+            current = row.get(key)
+            if isinstance(value, dict):
+                if "$gte" in value and not (current is not None and current >= value["$gte"]):
+                    return False
+                if "$exists" in value and ((key in row) != value["$exists"]):
+                    return False
+                if "$in" in value and current not in value["$in"]:
+                    return False
+            elif current != value:
+                return False
+        return True
+
+
+def _fake_server_db(*, project, user, scenes=None, characters=None):
+    settings = {
+        "id": server.SETTINGS_DOC_ID,
+        "mock_mode": True,
+        **server.DEFAULT_PROVIDER_SETTINGS,
+        "image": {"provider": "openai-image", "model": "gpt-image-1"},
+    }
+    return SimpleNamespace(
+        provider_settings=_MutableCollection([settings]),
+        projects=_MutableCollection([project]),
+        users=_MutableCollection([user]),
+        scenes=_MutableCollection(scenes or []),
+        characters=_MutableCollection(characters or []),
+        segments=_MutableCollection([]),
+        assets=_MutableCollection([]),
+        generations=_MutableCollection([]),
+        credit_events=_MutableCollection([]),
+        provider_activity=_MutableCollection([]),
+    )
+
+
 def test_successful_real_image_asset_metadata_is_saved(monkeypatch, tmp_path):
     fake_assets = _InsertCollection()
     monkeypatch.setattr(server, "db", SimpleNamespace(assets=fake_assets))
@@ -239,6 +313,114 @@ def test_successful_real_image_asset_metadata_is_saved(monkeypatch, tmp_path):
     assert fake_assets.rows[0]["asset_type"] == "scene_image"
     assert fake_assets.rows[0]["size_bytes"] == len(b"image-bytes")
     assert (tmp_path / fake_assets.rows[0]["storage_key"]).exists()
+
+
+def test_real_image_success_updates_scene_image_url(monkeypatch, tmp_path):
+    monkeypatch.setenv("USE_REAL_IMAGE_PROVIDER", "true")
+    monkeypatch.setattr(provider_executor, "key_present_for_modality", lambda *_: True)
+    monkeypatch.setattr(provider_executor, "key_status_for_modality", lambda *_: "configured")
+    cfg = storage_config({
+        "ASSET_STORAGE_BACKEND": "local",
+        "ASSET_LOCAL_DIR": str(tmp_path),
+        "ASSET_PUBLIC_BASE_URL": "https://assets.example.com/assets",
+    })
+    monkeypatch.setattr(server, "ASSET_STORAGE_CONFIG", cfg)
+    fake_db = _fake_server_db(
+        project={"id": "project-1", "user_id": "user-1", "provider_override_enabled": False},
+        user={"id": "user-1", "credits": 250, "credits_reserved": 0, "credits_used": 0},
+        scenes=[{
+            "id": "scene-1",
+            "project_id": "project-1",
+            "visual_prompt": "cinematic city",
+            "status": "draft",
+        }],
+    )
+    monkeypatch.setattr(server, "db", fake_db)
+
+    async def fake_execute_provider(**kwargs):
+        return ProviderResult(
+            modality="image",
+            provider_name="openai-image",
+            model_name="gpt-image-1",
+            mode="real",
+            status="success",
+            output={"image_bytes": b"real-scene-image", "mime_type": "image/png"},
+            provider_job_id="scene-job-1",
+        )
+
+    monkeypatch.setattr(server, "execute_provider", fake_execute_provider)
+
+    body = _run(server.generate_image("scene-1", user={"id": "user-1"}))
+
+    scene = fake_db.scenes.rows[0]
+    assert body["image_url"].startswith("https://assets.example.com/assets/")
+    assert scene["image_url"] == body["image_url"]
+    assert scene["status"] == "image_ready"
+    assert fake_db.assets.rows[0]["provider_name"] == "openai-image"
+    assert fake_db.assets.rows[0]["size_bytes"] == len(b"real-scene-image")
+
+
+def test_real_character_image_success_updates_reference_image_url(monkeypatch, tmp_path):
+    monkeypatch.setenv("USE_REAL_IMAGE_PROVIDER", "true")
+    monkeypatch.setattr(provider_executor, "key_present_for_modality", lambda *_: True)
+    monkeypatch.setattr(provider_executor, "key_status_for_modality", lambda *_: "configured")
+    cfg = storage_config({
+        "ASSET_STORAGE_BACKEND": "local",
+        "ASSET_LOCAL_DIR": str(tmp_path),
+        "ASSET_PUBLIC_BASE_URL": "https://assets.example.com/assets",
+    })
+    monkeypatch.setattr(server, "ASSET_STORAGE_CONFIG", cfg)
+    fake_db = _fake_server_db(
+        project={"id": "project-1", "user_id": "user-1", "provider_override_enabled": False},
+        user={"id": "user-1", "credits": 250, "credits_reserved": 0, "credits_used": 0},
+        characters=[{
+            "id": "char-1",
+            "project_id": "project-1",
+            "name": "Ari",
+            "description": "pilot",
+            "voice_style": "calm",
+        }],
+    )
+    monkeypatch.setattr(server, "db", fake_db)
+
+    async def fake_execute_provider(**kwargs):
+        return ProviderResult(
+            modality="image",
+            provider_name="openai-image",
+            model_name="gpt-image-1",
+            mode="real",
+            status="success",
+            output={"image_bytes": b"real-character-image", "mime_type": "image/png"},
+            provider_job_id="char-job-1",
+        )
+
+    monkeypatch.setattr(server, "execute_provider", fake_execute_provider)
+
+    body = _run(server.generate_character_image("char-1", user={"id": "user-1"}))
+
+    character = fake_db.characters.rows[0]
+    assert body["reference_image_url"].startswith("https://assets.example.com/assets/")
+    assert character["reference_image_url"] == body["reference_image_url"]
+    assert fake_db.assets.rows[0]["asset_type"] == "character_image"
+    assert fake_db.assets.rows[0]["character_id"] == "char-1"
+
+
+def test_legacy_localhost_asset_urls_are_rewritten_for_browser(monkeypatch, tmp_path):
+    cfg = storage_config({
+        "ASSET_STORAGE_BACKEND": "local",
+        "ASSET_LOCAL_DIR": str(tmp_path),
+        "ASSET_PUBLIC_BASE_URL": "https://assets.example.com/assets",
+    })
+    monkeypatch.setattr(server, "ASSET_STORAGE_CONFIG", cfg)
+
+    assert (
+        server._browser_safe_asset_url("http://localhost:8000/assets/user/project/scene.png")
+        == "https://assets.example.com/assets/user/project/scene.png"
+    )
+    assert (
+        server._browser_safe_asset_url("http://127.0.0.1:8000/assets/user/project/char.png")
+        == "https://assets.example.com/assets/user/project/char.png"
+    )
 
 
 def test_image_readiness_status_includes_activation_checklist(monkeypatch):

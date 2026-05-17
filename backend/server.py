@@ -11,6 +11,7 @@ import random
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
+from urllib.parse import urlparse
 import uuid
 import importlib
 from datetime import datetime, timezone, timedelta
@@ -524,6 +525,29 @@ def _credit_status_from_user(user: dict) -> dict:
         "credits_used": used,
         "currency": "credits",
     }
+
+
+def _browser_safe_asset_url(url: Optional[str]) -> Optional[str]:
+    """Rewrite legacy localhost asset URLs to the configured public asset host."""
+    if not url:
+        return url
+    raw = str(url)
+    parsed = urlparse(raw)
+    if parsed.scheme in {"http", "https"} and parsed.hostname in {"localhost", "127.0.0.1"}:
+        if parsed.path.startswith("/assets/"):
+            return f"{ASSET_STORAGE_CONFIG.public_base_url}{parsed.path[len('/assets'):]}"
+    return raw
+
+
+def _normalize_project_asset_urls(scenes: List[dict], characters: List[dict]) -> None:
+    for scene in scenes:
+        scene["image_url"] = _browser_safe_asset_url(scene.get("image_url"))
+        for segment in scene.get("segments") or []:
+            segment["video_url"] = _browser_safe_asset_url(segment.get("video_url"))
+    for character in characters:
+        character["reference_image_url"] = _browser_safe_asset_url(
+            character.get("reference_image_url")
+        )
 
 
 async def _fresh_user(user_id: str) -> dict:
@@ -1128,18 +1152,18 @@ async def _build_effective_providers(project: dict) -> dict:
     """Returns the effective config that *would* be used for each modality.
     When override is off → values come from global. When on → from the project."""
     global_settings = await _load_provider_settings()
-    override_on = bool(project.get("provider_override_enabled"))
     effective: dict = {}
     for modality in PROVIDER_MODALITIES:
-        if override_on:
-            view = _project_modality_view(project, modality, "project")
-            # Fall back to global value if the project didn't choose one yet.
-            if not view["provider"]:
-                view = _global_modality_view(global_settings, modality)
-                view["source"] = "global-fallback"
-        else:
-            view = _global_modality_view(global_settings, modality)
-        effective[modality] = view
+        resolved = resolve_provider(
+            modality=modality,  # type: ignore[arg-type]
+            project=project,
+            global_settings=global_settings,
+        )
+        effective[modality] = {
+            "provider": resolved["provider"],
+            "model": resolved["model"],
+            "source": resolved["source"],
+        }
     return effective
 
 
@@ -1457,6 +1481,7 @@ async def get_project(
     # attach segments to each scene
     for s in scenes:
         s["segments"] = await db.segments.find({"scene_id": s["id"]}, {"_id": 0}).sort("order", 1).to_list(50)
+    _normalize_project_asset_urls(scenes, characters)
     return {"project": proj, "scenes": scenes, "characters": characters}
 
 

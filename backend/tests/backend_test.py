@@ -857,6 +857,30 @@ def test_project_provider_override_round_trip(s):
         s.delete(f"{API}/projects/{pid}")
 
 
+def test_images_tab_hint_source_matches_backend_image_status(s):
+    p = s.post(f"{API}/projects", json={"title": "TEST_Image_Status", "idea": "x"}).json()
+    pid = p["id"]
+    try:
+        r = s.put(
+            f"{API}/projects/{pid}/providers",
+            json={
+                "provider_override_enabled": True,
+                "image_provider": "openai-image",
+                "image_model": "gpt-image-1",
+            },
+        )
+        assert r.status_code == 200, r.text
+        providers = r.json()
+        status = s.get(f"{API}/providers/image/status?project_id={pid}")
+        assert status.status_code == 200, status.text
+        body = status.json()
+        assert providers["effective"]["image"]["provider"] == body["selected_provider"]
+        assert providers["effective"]["image"]["model"] == body["selected_model"]
+        assert providers["effective"]["image"]["source"] == body["source"]
+    finally:
+        s.delete(f"{API}/projects/{pid}")
+
+
 def test_project_provider_rejects_unknown(s, project_id):
     r = s.put(
         f"{API}/projects/{project_id}/providers",

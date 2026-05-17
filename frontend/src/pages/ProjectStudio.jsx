@@ -37,7 +37,29 @@ export default function ProjectStudio() {
 
   const load = useCallback(() => Projects.get(id).then(setData), [id]);
   const loadProviders = useCallback(
-    () => ProjectProviders.get(id).then(setProviders),
+    () =>
+      Promise.all([
+        ProjectProviders.get(id),
+        ProjectProviders.status(id, "image").catch(() => null),
+      ]).then(([providerData, imageStatus]) => {
+        const next = { ...providerData };
+        if (imageStatus) {
+          next.status = { ...(providerData.status || {}), image: imageStatus };
+          next.effective = {
+            ...(providerData.effective || {}),
+            image: {
+              ...(providerData.effective?.image || {}),
+              provider: imageStatus.selected_provider || imageStatus.provider,
+              model: imageStatus.selected_model || imageStatus.model,
+              source: imageStatus.source,
+              mode: imageStatus.mode,
+              status: imageStatus.status,
+              would_use_real_provider: imageStatus.would_use_real_provider,
+            },
+          };
+        }
+        setProviders(next);
+      }),
     [id]
   );
   const loadVoiceRes = useCallback(
@@ -75,10 +97,11 @@ export default function ProjectStudio() {
   const reloadAll = useCallback(
     (opts = {}) => {
       if (!opts.skipProject) load();
+      loadProviders();
       loadVoiceRes();
       loadSceneCosts({ trackDelta: true });
     },
-    [load, loadVoiceRes, loadSceneCosts]
+    [load, loadProviders, loadVoiceRes, loadSceneCosts]
   );
 
   useEffect(() => {

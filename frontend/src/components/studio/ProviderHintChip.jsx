@@ -2,7 +2,15 @@ import { PlugZap } from "lucide-react";
 
 export function ProviderHintChip({ providers, modality, action, credits, testId }) {
   if (!providers) return null;
-  const eff = providers.effective?.[modality];
+  const status = providers.status?.[modality];
+  const eff = status
+    ? {
+        ...(providers.effective?.[modality] || {}),
+        provider: status.selected_provider || status.provider,
+        model: status.selected_model || status.model,
+        source: status.source,
+      }
+    : providers.effective?.[modality];
   if (!eff) return null;
   const overrideOn = providers.provider_override_enabled;
   const usingProject = overrideOn && eff.source === "project";
