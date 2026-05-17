@@ -1,7 +1,7 @@
 # AI Episode Studio — PRD
 
 ## Problem Statement
-Build a full-stack web MVP called AI Episode Studio that helps creators generate complete 1–3 minute AI story videos from characters, scenes, voice, music and short video clips. The product remains mock-first for image/video/voice/music/export. Real LLM execution exists for story and prompt text operations only, gated by server-side feature flags and key/runtime availability, with deterministic mock fallback.
+Build a full-stack web MVP called AI Episode Studio that helps creators generate complete 1–3 minute AI story videos from characters, scenes, voice, music and short video clips. The product remains mock-first for video/voice/music/export. Real LLM execution exists for story and prompt text operations only, and real OpenAI image generation exists behind disabled-by-default guards, server-side secrets, credit checks, and asset storage.
 
 ## Architecture
 - Backend: FastAPI + MongoDB (relational-style schemas), all routes under `/api`
@@ -10,7 +10,11 @@ Build a full-stack web MVP called AI Episode Studio that helps creators generate
   tokens, and per-user project ownership. `AUTH_ENABLED=false` plus
   `AUTH_DEMO_MODE=true` preserves the seeded no-token `user-demo` workflow for
   local demos/tests.
-- Provider architecture exists under `backend/providers/`; LLM is real-capable behind `USE_REAL_LLM_PROVIDER`, while image/video/voice/music/export remain mock-only by construction.
+- Provider architecture exists under `backend/providers/`; LLM is real-capable
+  behind `USE_REAL_LLM_PROVIDER`, OpenAI image is real-capable behind
+  `USE_REAL_IMAGE_PROVIDER`, and video now has a disabled-by-default guard
+  foundation for future Luma integration. Video/voice/music/export remain
+  mock-only at runtime.
 - Mock generators return curated static URLs (Unsplash + Google sample mp4s) and log every generation/provider activity.
 
 ## Data Models (MongoDB collections)
@@ -31,15 +35,16 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 - Scene CRUD with full field set (incl. dialogue, music_mood, camera_direction, voice, characters tags)
 - Character CRUD with placeholder portrait, per-character voice override, `order` field, and drag handles in the Cast view.
 - Mock image generation (curated URL pool, 5% mock failure to populate admin failed jobs)
-- Mock 5s video segment generation, "Expand next 5s", approve/reject/regenerate
+- Mock video segment generation, "Expand next 5s", approve/reject/regenerate,
+  with configurable segment duration and scene/project duration caps.
 - Cost estimator (POST /api/cost-estimate + GET /api/projects/{id}/cost-estimate)
 - Final Export page with stitched preview (mock final video URL)
 - Admin console: stats + users/projects/generations/failed jobs/provider activity/provider health/recently deleted tables
 - Provider settings + per-project provider overrides; real LLM is gated and
   available for text operations. Real OpenAI image support exists but is
   disabled by default and guarded by feature flag, server-side secret, credits,
-  storage, and provider activity logging. Video/voice/music/export remain
-  mock-only.
+  storage, and provider activity logging. Video has provider readiness/status
+  and duration guardrails only; video/voice/music/export remain mock-only.
 - Real image provider planning and guard details are documented in
   `docs/IMAGE_PROVIDER_PLAN.md`.
 - Backend-only provider secrets resolver exists with disabled mode and AWS SSM
@@ -68,14 +73,15 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
   `docs/AUTH_PLAN.md`.
 - Current MVP status: mock-first workflow is mature; real LLM is gated and
   available for text operations; real OpenAI image is implemented but disabled
-  by default; video/voice/music/export remain mock-only.
+  by default; video guardrails are implemented but no real video provider is
+  connected; voice/music/export remain mock-only.
 - 100% MVP still requires real image staging/private-beta enablement, real
   video segments, real voice/music or upload fallback, real FFmpeg export,
   production object storage configuration, deployment, and end-to-end real
   media validation.
 - Recommended build order:
   1. Real image staging/private-beta enablement.
-  2. Real video provider planning and guard design.
+  2. Real video provider implementation behind existing guards.
   3. Real voice/music.
   4. Real export.
   5. Production storage configuration.
@@ -143,14 +149,34 @@ provider activity logging.
 - Recommended Luma Ray as the first MVP video provider because it best matches
   the current scene image -> 5-second segment -> Expand Next 5 Seconds model.
 - Documented required disabled-by-default envs:
-  `USE_REAL_VIDEO_PROVIDER=false`, `VIDEO_REAL_PROVIDER=`,
-  `VIDEO_REAL_MODEL=`, `VIDEO_SEGMENT_SECONDS=5`,
+  `USE_REAL_VIDEO_PROVIDER=false`, `VIDEO_REAL_PROVIDER=luma`,
+  `VIDEO_REAL_MODEL=ray`, `VIDEO_SEGMENT_SECONDS=5`,
   `VIDEO_MAX_SEGMENTS_PER_SCENE=3`, and `VIDEO_MAX_PROJECT_SECONDS=60`.
 - Documented SSM secret paths for Luma, Runway, OpenAI video, and fal.ai.
 - Documented credit rules, storage requirements, backend API design, frontend
   UX, tests, rollback, and private beta plan.
 - No real video code, real video API calls, API key inputs, Stripe changes,
   real LLM changes, or real image behavior changes were added.
+
+## Iteration 36 (2026-05) — Video provider guard foundation
+- Added disabled-by-default video provider env placeholders to
+  `backend/.env.example`: `USE_REAL_VIDEO_PROVIDER=false`,
+  `VIDEO_REAL_PROVIDER=luma`, `VIDEO_REAL_MODEL=ray`,
+  `VIDEO_SEGMENT_SECONDS=5`, `VIDEO_MAX_SEGMENTS_PER_SCENE=3`, and
+  `VIDEO_MAX_PROJECT_SECONDS=60`.
+- Updated provider catalog/status readiness for `luma`, `runway`,
+  `openai-video`/`sora`, and `fal-video`.
+- Added backend video guard config and enforced segment/project duration caps
+  in mock segment creation and Expand Next 5 Seconds before credits are
+  deducted. Limit errors return `Video segment limit reached for this MVP.`
+- Updated the Video Segments tab to display mock/real flag status, estimated
+  credits per configured segment, max segments per scene, max project seconds,
+  and current project video duration.
+- Added focused unit tests for video status/readiness, segment duration config,
+  scene max segment blocking, project max seconds blocking, and mock generation
+  inside limits.
+- No real video provider class, real video API call, frontend API key input,
+  Stripe change, real LLM change, or real image behavior change was added.
 
 ## Auth Plan
 - `docs/AUTH_PLAN.md` compares Emergent Google login, custom JWT auth, and

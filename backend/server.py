@@ -191,9 +191,11 @@ PROVIDER_CATALOG = {
         {"id": "custom", "label": "Custom image provider", "models": []},
     ],
     "video": [
-        {"id": "sora-2", "label": "Sora 2", "models": ["sora-2"]},
+        {"id": "luma", "label": "Luma Ray / Dream Machine", "models": ["ray", "ray-2", "ray-flash-2"]},
         {"id": "runway", "label": "Runway Gen-4.5", "models": ["gen-4.5", "gen-4.5-turbo"]},
-        {"id": "luma", "label": "Luma Ray / Dream Machine", "models": ["ray-2", "dream-machine-1.6"]},
+        {"id": "openai-video", "label": "OpenAI Sora", "models": ["sora-2", "sora-2-pro"]},
+        {"id": "sora", "label": "Sora", "models": ["sora-2", "sora-2-pro"]},
+        {"id": "fal-video", "label": "fal.ai Video", "models": ["kling-video", "seedance-video"]},
         {"id": "custom", "label": "Custom video provider", "models": []},
     ],
     "voice": [
@@ -266,13 +268,29 @@ def studio_config() -> dict:
     }
 
 
+VIDEO_LIMIT_MESSAGE = "Video segment limit reached for this MVP."
+
+
+def video_guard_config() -> dict:
+    return {
+        "segment_seconds": max(1, _int_env("VIDEO_SEGMENT_SECONDS", 5)),
+        "max_segments_per_scene": max(1, _int_env("VIDEO_MAX_SEGMENTS_PER_SCENE", 3)),
+        "max_project_seconds": max(1, _int_env("VIDEO_MAX_PROJECT_SECONDS", 60)),
+    }
+
+
 def _wallet_state(pct: float) -> str:
     return wallet_state(pct)
 
 DEFAULT_PROVIDER_SETTINGS = {
     "llm": {"provider": "openai", "model": "gpt-5.2", "custom_provider": "", "custom_model": ""},
     "image": {"provider": "fal", "model": "flux-pro", "custom_provider": "", "custom_model": ""},
-    "video": {"provider": "sora-2", "model": "sora-2", "custom_provider": "", "custom_model": ""},
+    "video": {
+        "provider": os.environ.get("VIDEO_REAL_PROVIDER", "luma"),
+        "model": os.environ.get("VIDEO_REAL_MODEL", "ray"),
+        "custom_provider": "",
+        "custom_model": "",
+    },
     "voice": {"provider": "elevenlabs", "model": "eleven-v3", "custom_provider": "", "custom_model": ""},
     "music": {"provider": "suno", "model": "v4", "custom_provider": "", "custom_model": ""},
     "export": {"provider": "ffmpeg-local", "model": "ffmpeg-6", "custom_provider": "", "custom_model": ""},
@@ -725,6 +743,7 @@ async def meta_options():
         "voices": VOICE_OPTIONS,
         "music_moods": MUSIC_MOODS,
         "costs": COSTS,
+        "video_guard": video_guard_config(),
     }
 
 
@@ -2146,6 +2165,7 @@ async def _create_scene_segment(
     expand_mode = "expand"  → continues from latest segment under the same scene.
     """
     scene = await _owned_scene(scene_id, user)
+    guard_config = await _assert_video_generation_allowed(scene)
     cost = COSTS["video_segment"]
     await _check_credits(user, cost, "video_segment")
     # Provider execution guard for video generation.
@@ -2174,7 +2194,7 @@ async def _create_scene_segment(
         if expand_mode == "expand":
             parent_segment_id = last["id"]
 
-    duration = 5
+    duration = int(guard_config["segment_seconds"])
     doc = {
         "id": new_id(),
         "scene_id": scene_id,
@@ -2201,6 +2221,24 @@ async def _create_scene_segment(
     doc["cost"] = cost
     doc["remaining_credits"] = remaining_credits
     return doc
+
+
+async def _project_video_seconds(project_id: str) -> int:
+    rows = await db.segments.find({"project_id": project_id}, {"_id": 0, "duration": 1}).to_list(10000)
+    return sum(int(row.get("duration") or video_guard_config()["segment_seconds"]) for row in rows)
+
+
+async def _assert_video_generation_allowed(scene: dict) -> dict:
+    cfg = video_guard_config()
+    scene_id = scene["id"]
+    project_id = scene["project_id"]
+    existing_count = await db.segments.count_documents({"scene_id": scene_id})
+    if existing_count >= int(cfg["max_segments_per_scene"]):
+        raise HTTPException(400, VIDEO_LIMIT_MESSAGE)
+    project_seconds = await _project_video_seconds(project_id)
+    if project_seconds + int(cfg["segment_seconds"]) > int(cfg["max_project_seconds"]):
+        raise HTTPException(400, VIDEO_LIMIT_MESSAGE)
+    return cfg
 
 
 @api.post("/scenes/{scene_id}/segments")

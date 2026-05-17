@@ -74,6 +74,14 @@ def _real_capable(modality: Modality, provider_name: Optional[str]) -> bool:
         except Exception:  # pragma: no cover
             return False
         return (provider_name or "").strip().lower() in OPENAI_IMAGE_PROVIDER_IDS
+    if modality == "video":
+        return (provider_name or "").strip().lower() in {
+            "luma",
+            "runway",
+            "openai-video",
+            "sora",
+            "fal-video",
+        }
     return False
 
 

@@ -884,7 +884,7 @@ def test_existing_routes_still_work_with_override(s):
             json={
                 "provider_override_enabled": True,
                 "image_provider": "fal", "image_model": "flux-pro",
-                "video_provider": "sora-2", "video_model": "sora-2",
+                "video_provider": "luma", "video_model": "ray",
             },
         )
         # Existing creative pipeline still functions on mocks
@@ -914,7 +914,7 @@ def test_effective_resolution_per_modality(s):
         json={
             "llm":    {"provider": "openai", "model": "gpt-5.2"},
             "image":  {"provider": "fal", "model": "flux-pro"},
-            "video":  {"provider": "sora-2", "model": "sora-2"},
+            "video":  {"provider": "luma", "model": "ray"},
             "voice":  {"provider": "elevenlabs", "model": "eleven-v3"},
             "music":  {"provider": "suno", "model": "v4"},
             "export": {"provider": "ffmpeg-local", "model": "ffmpeg-6"},
@@ -933,7 +933,7 @@ def test_effective_resolution_per_modality(s):
             assert d["effective"][m]["source"] == "global"
         assert d["effective"]["llm"]["provider"] == "openai"
         assert d["effective"]["image"]["provider"] == "fal"
-        assert d["effective"]["video"]["provider"] == "sora-2"
+        assert d["effective"]["video"]["provider"] == "luma"
         assert d["effective"]["voice"]["provider"] == "elevenlabs"
         assert d["effective"]["music"]["provider"] == "suno"
         assert d["effective"]["export"]["provider"] == "ffmpeg-local"

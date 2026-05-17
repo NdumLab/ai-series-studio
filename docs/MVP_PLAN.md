@@ -48,8 +48,12 @@ Completed today:
   stored in MongoDB.
 - Real LLM gating: real LLM support exists for story/text operations behind
   `USE_REAL_LLM_PROVIDER`, with mock fallback.
-- Mock remaining non-LLM providers: Video, Voice, Music, and Export remain
-  mock-only.
+- Video guard foundation: video provider status recognizes Luma, Runway,
+  OpenAI/Sora, and fal.ai video providers; disabled-by-default env placeholders
+  exist; mock video generation uses `VIDEO_SEGMENT_SECONDS`; and scene/project
+  duration caps block runaway generation before future real calls are added.
+  No real video provider class or network call exists yet.
+- Mock remaining non-LLM providers: Voice, Music, and Export remain mock-only.
 - Cost tracking: operation costs, project/scene estimates, wallet ring,
   high-cost scene warnings, trend deltas, reduce-to-draft, per-user credit
   balances, `GET /api/credits/status`, credit event logging, and
@@ -109,12 +113,13 @@ Completed:
 - [x] Real OpenAI image provider behind guards.
 - [x] Real image staging/private-beta enablement runbook.
 - [x] Real video provider guard design and implementation plan.
+- [x] Video provider guard foundation.
 
 Remaining:
 
 - [x] Production auth/user ownership hardening before paid billing.
 - [ ] Real image staging rollout and private-beta enablement.
-- [ ] Real video provider.
+- [ ] Real video provider implementation.
 - [ ] Real voice provider.
 - [ ] Real music/SFX provider.
 - [ ] Real FFmpeg export worker.
@@ -190,6 +195,7 @@ decision and are not enabled.
 ### Phase 5: Real video provider
 
 - Completed: add [`docs/VIDEO_PROVIDER_PLAN.md`](VIDEO_PROVIDER_PLAN.md).
+- Completed: add disabled-by-default video provider guard foundation.
 - Recommended first provider: Luma Ray.
 - Next: implement one real video provider with feature flag, server-side SSM
   secret, credit checks, asset storage, provider activity logging, mocked unit

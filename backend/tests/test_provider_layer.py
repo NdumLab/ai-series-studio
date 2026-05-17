@@ -29,6 +29,11 @@ GLOBAL = {
     "export": {"provider": "ffmpeg-local","model": "ffmpeg-6"},
 }
 
+GLOBAL_LUMA = {
+    **GLOBAL,
+    "video": {"provider": "luma", "model": "ray"},
+}
+
 
 # ---------- Resolver ----------
 def test_resolver_global_fallback_when_no_override():
@@ -194,6 +199,33 @@ def test_provider_status_image_blocked_when_flag_on_and_key_missing(monkeypatch)
     assert snap["key_present"] is False
     assert snap["key_status"] == "not_configured"
     assert snap["secrets_backend"] == "disabled"
+    assert snap["would_use_real_provider"] is False
+    assert snap["status"] == "blocked"
+
+
+def test_provider_status_video_luma_ready_fields_when_flag_off(clean_env):
+    snap = provider_status(modality="video", project=None, global_settings=GLOBAL_LUMA)
+
+    assert snap["selected_provider"] == "luma"
+    assert snap["selected_model"] == "ray"
+    assert snap["feature_flag_enabled"] is False
+    assert snap["secrets_backend"] == "disabled"
+    assert snap["key_present"] is False
+    assert snap["real_capable"] is True
+    assert snap["would_use_real_provider"] is False
+    assert snap["status"] == "mock"
+
+
+def test_provider_status_video_blocked_when_flag_on_and_key_missing(monkeypatch):
+    monkeypatch.setenv("USE_REAL_VIDEO_PROVIDER", "true")
+    monkeypatch.setenv("SECRETS_BACKEND", "disabled")
+
+    snap = provider_status(modality="video", project=None, global_settings=GLOBAL_LUMA)
+
+    assert snap["selected_provider"] == "luma"
+    assert snap["feature_flag_enabled"] is True
+    assert snap["key_present"] is False
+    assert snap["real_capable"] is True
     assert snap["would_use_real_provider"] is False
     assert snap["status"] == "blocked"
 

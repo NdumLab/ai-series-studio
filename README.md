@@ -10,8 +10,10 @@ The app is intentionally mock-first. Provider selection and provider activity
 plumbing exist, and real LLM execution is gated behind server-side flags and
 keys. The first real image provider implementation exists for OpenAI GPT Image,
 but it is disabled by default and cannot run without the image feature flag,
-server-side secrets, credit checks, and asset storage. Video, voice, music, and
-export providers remain mock-only.
+server-side secrets, credit checks, and asset storage. Video now has a
+disabled-by-default guard foundation for future Luma integration, but no real
+video API calls are implemented. Voice, music, and export providers remain
+mock-only.
 
 ## MVP Plan
 
@@ -58,7 +60,11 @@ Real video provider planning is documented in
   blocked until `USE_REAL_IMAGE_PROVIDER=true`, a server-side OpenAI image
   secret is available through the secrets resolver, credit/cost checks pass,
   and generated image storage succeeds.
-- Video, voice, music, and export providers remain mock-only.
+- Video has a disabled-by-default provider guard foundation for future Luma
+  integration. Provider status recognizes Luma, Runway, OpenAI/Sora, and
+  fal.ai video options; mock video generation enforces configured segment and
+  project duration caps. No real video provider class or network call exists.
+- Voice, music, and export providers remain mock-only.
 - A backend-only secrets resolver foundation exists. It defaults to disabled
   mode and can later resolve provider API keys from AWS SSM Parameter Store
   `SecureString` without exposing secret values to MongoDB or the frontend.
@@ -141,6 +147,12 @@ ASSET_S3_BUCKET=
 ASSET_S3_REGION=us-east-1
 ASSET_S3_PREFIX=ai-series-studio
 ASSET_SIGNED_URL_EXPIRE_SECONDS=3600
+USE_REAL_VIDEO_PROVIDER=false
+VIDEO_REAL_PROVIDER=luma
+VIDEO_REAL_MODEL=ray
+VIDEO_SEGMENT_SECONDS=5
+VIDEO_MAX_SEGMENTS_PER_SCENE=3
+VIDEO_MAX_PROJECT_SECONDS=60
 ```
 
 `AUTH_JWT_SECRET` and `AUTH_TOKEN_EXPIRES_MINUTES` are accepted only as
@@ -372,7 +384,12 @@ REACT_APP_BACKEND_URL=http://localhost:8000 python -m pytest backend/tests/backe
 - Real LLM calls are guarded by `USE_REAL_LLM_PROVIDER=true` and the required
   server-side LLM key/runtime. If the flag is off, missing, or the real call
   fails, the app falls back to mock behavior.
-- Image, video, voice, music, and export remain mock-only even if their
+- Image can run OpenAI GPT Image only when every server-side guard passes.
+- Video provider status and guardrails exist, but video remains mock-only.
+  `USE_REAL_VIDEO_PROVIDER=true` is blocked unless a future provider
+  implementation, server-side SSM secret, credit checks, and duration limits
+  all pass.
+- Voice, music, and export remain mock-only even if their
   `USE_REAL_*_PROVIDER` flags are set.
 - Do not put real API keys in `.env.example`, README examples, or committed
   files.
@@ -400,11 +417,12 @@ Completed:
 - Real OpenAI image provider behind guards.
 - Real image staging/private-beta enablement runbook.
 - Real video provider integration plan.
+- Video provider guard foundation.
 
 Still remaining before paid MVP:
 
 - Real Image provider rollout / private-beta enablement.
-- Real Video provider.
+- Real Video provider implementation.
 - Real Voice provider.
 - Real Music provider.
 - Real Export / FFmpeg worker.
@@ -412,9 +430,10 @@ Still remaining before paid MVP:
 - Multi-tenant teams.
 - Versioned scene revisions.
 
-Next recommended implementation: real video provider planning and guard design.
-Keep the OpenAI image provider disabled until staging has a server-side SSM
-secret, capped credits, and reviewed provider activity.
+Next recommended implementation: real Luma provider implementation behind the
+existing video guards, with mocked unit tests and no default real calls. Keep
+the OpenAI image provider disabled until staging has a server-side SSM secret,
+capped credits, and reviewed provider activity.
 
 ## Useful Paths
 

@@ -18,14 +18,37 @@ export function VideoSegmentsTab({ scenes, providers, options, setData, reload }
     return <EmptyState text="Split your story into scenes first." />;
   }
   const c = options?.costs?.video_segment;
+  const videoGuard = options?.video_guard || {};
+  const segmentSeconds = videoGuard.segment_seconds || 5;
+  const maxSegments = videoGuard.max_segments_per_scene || 3;
+  const maxProjectSeconds = videoGuard.max_project_seconds || 60;
+  const currentProjectSeconds = scenes.reduce(
+    (total, scene) =>
+      total +
+      (scene.segments || []).reduce(
+        (sceneTotal, segment) => sceneTotal + (segment.duration || segmentSeconds),
+        0
+      ),
+    0
+  );
+  const videoRealFlag = !!providers?.feature_flags?.video;
   return (
     <div className="space-y-4" data-testid="segments-tab">
       <ProviderHintChip
         providers={providers}
         modality="video"
         action="video generation"
-        credits={c ? `~${c} credits per 5-second segment` : null}
+        credits={c ? `~${c} credits per ${segmentSeconds}-second segment` : null}
       />
+      <div className="es-card p-3 flex flex-wrap items-center gap-2 border-white/10 bg-white/[0.02]">
+        <span className="px-2 py-0.5 rounded-md border border-white/15 text-[10px] font-mono uppercase tracking-widest text-[#A1A1AA]">
+          {videoRealFlag ? "Real flag on" : "Mock video active"}
+        </span>
+        <span className="text-xs text-[#A1A1AA]">
+          Segment {segmentSeconds}s · max {maxSegments}/scene · project{" "}
+          {currentProjectSeconds}/{maxProjectSeconds}s
+        </span>
+      </div>
       <InfoCallout text={VIDEO_HINT} />
       {scenes.map((s, i) => (
         <SceneSegmentBlock

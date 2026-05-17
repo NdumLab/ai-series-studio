@@ -21,11 +21,17 @@ The current Video Segments tab is mock-first:
 - `start_second` is recomputed from segment order and duration.
 - Project/scene cost widgets include video segment cost.
 - Provider activity records safe metadata only.
+- Disabled-by-default video provider guard foundation exists. Provider status
+  recognizes Luma, Runway, OpenAI/Sora, and fal.ai video providers, but no real
+  video provider class or network call exists yet.
+- Mock segment creation and expansion enforce configured segment/project
+  duration caps before credits are deducted.
 
 Current mock video segment behavior:
 
-- `POST /api/scenes/{scene_id}/segments` creates a 5-second mock segment.
-- `POST /api/scenes/{scene_id}/segments/expand` creates the next 5-second mock
+- `POST /api/scenes/{scene_id}/segments` creates a mock segment using
+  `VIDEO_SEGMENT_SECONDS`.
+- `POST /api/scenes/{scene_id}/expand` creates the next mock
   segment with `parent_segment_id`, `expand_mode="expand"`, and a continuity
   prompt.
 - `POST /api/segments/{segment_id}/regenerate` keeps the segment record but
@@ -106,8 +112,8 @@ Required disabled-by-default envs:
 
 ```bash
 USE_REAL_VIDEO_PROVIDER=false
-VIDEO_REAL_PROVIDER=
-VIDEO_REAL_MODEL=
+VIDEO_REAL_PROVIDER=luma
+VIDEO_REAL_MODEL=ray
 VIDEO_SEGMENT_SECONDS=5
 VIDEO_MAX_SEGMENTS_PER_SCENE=3
 VIDEO_MAX_PROJECT_SECONDS=60
@@ -120,6 +126,10 @@ Runtime rules:
 - `VIDEO_SEGMENT_SECONDS` controls initial and expanded segment duration.
 - `VIDEO_MAX_SEGMENTS_PER_SCENE` blocks runaway expand loops.
 - `VIDEO_MAX_PROJECT_SECONDS` blocks project-wide overspend.
+- Current mock generation already enforces the segment and project duration
+  limits and returns `Video segment limit reached for this MVP.` when blocked.
+- `/api/providers/video/status` returns selected provider/model, feature flag
+  state, secrets backend, key presence, `real_capable`, and `status` values.
 - Feature flag changes require backend restart unless runtime config hot-reload
   is explicitly implemented later.
 
@@ -253,6 +263,7 @@ Video Segments tab should show:
 - estimated credits per 5-second segment
 - max allowed segments per scene
 - max project seconds
+- current project video duration
 - generation progress state
 - failed state with retry/regenerate action
 - insufficient credits warning
@@ -273,6 +284,7 @@ Backend tests:
 
 - real video blocked when `USE_REAL_VIDEO_PROVIDER=false`
 - real video blocked when key is missing
+- video status endpoint/readiness includes Luma provider fields
 - real video blocked when selected provider is not allowlisted
 - insufficient credits block before provider call
 - missing scene image blocks image-to-video real call
@@ -337,7 +349,7 @@ Before increasing scope:
 
 ## Non-Goals
 
-- No real video provider code in this pass.
+- No real video provider class in this pass.
 - No real video API calls.
 - No voice, music, or export provider work.
 - No frontend API key inputs.
