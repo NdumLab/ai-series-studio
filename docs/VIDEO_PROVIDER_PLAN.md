@@ -327,7 +327,9 @@ Rollback should not affect:
 
 Use [`LUMA_VIDEO_STAGING_RUNBOOK.md`](LUMA_VIDEO_STAGING_RUNBOOK.md) for the
 first controlled one-segment activation. Do not enable real video until that
-checklist is complete.
+checklist is complete. A dry readiness pass can be completed with
+`USE_REAL_VIDEO_PROVIDER=false` to verify provider status, project data,
+credits, duration caps, and asset serving before any real Luma call is allowed.
 
 Start narrow:
 

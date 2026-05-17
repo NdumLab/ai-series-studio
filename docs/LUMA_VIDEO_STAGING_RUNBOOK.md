@@ -126,6 +126,42 @@ The response must not include the secret value.
 - [ ] Voice, music, and export remain mock-only.
 - [ ] No frontend API key inputs are visible.
 
+## Dry Readiness Pass Before Enabling
+
+Run this pass while `USE_REAL_VIDEO_PROVIDER=false`. It should make no real
+Luma calls and should not generate video.
+
+1. Check video provider status:
+
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8000/api/providers/video/status?project_id=<project_id>"
+```
+
+Expected dry signal:
+
+- `selected_provider=luma`
+- `selected_model=ray`
+- `feature_flag_enabled=false`
+- `would_use_real_provider=false`
+- `real_capable=true`
+- `mode=mock`
+- `status=mock` or `blocked`
+- `secret_ref=/ai-series-studio/providers/video/luma/api-key`
+
+2. Confirm the dry test project has exactly one prepared scene with:
+   - `image_url` if testing image-to-video later
+   - `enhanced_video_prompt`
+   - zero or few existing video segments
+   - project video duration below `VIDEO_MAX_PROJECT_SECONDS`
+   - scene segment count below `VIDEO_MAX_SEGMENTS_PER_SCENE`
+3. Confirm the scene image URL is publicly served from `ASSET_PUBLIC_BASE_URL`.
+4. Confirm `GET /api/credits/status` shows at least one `video_segment` cost
+   available.
+5. Confirm `backend/generated_assets/` is ignored by git.
+6. Confirm no bulk generation or Expand Next 5 Seconds test is planned for the
+   first real activation.
+
 ## Test One 5-Second Video Segment
 
 1. Create or open a single test project.

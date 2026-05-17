@@ -447,7 +447,9 @@ Still remaining before paid MVP:
 
 Next recommended implementation: private-beta validation for Luma video with
 server-side SSM secret, capped credits, reviewed provider activity, and
-rollback via `USE_REAL_VIDEO_PROVIDER=false`.
+rollback via `USE_REAL_VIDEO_PROVIDER=false`. A dry readiness pass has verified
+mock-mode status, project data, credits, and asset serving without enabling
+real video.
 
 ## Useful Paths
 

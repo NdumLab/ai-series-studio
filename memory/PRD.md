@@ -214,6 +214,22 @@ provider activity logging.
   Stripe changes, real LLM changes, real image changes, or voice/music/export
   provider connections were added.
 
+## Iteration 40 (2026-05) — Luma video dry staging readiness
+
+- Verified dry video status with `USE_REAL_VIDEO_PROVIDER=false`: effective
+  provider `luma/ray`, `real_capable=true`, `would_use_real_provider=false`,
+  `mode=mock`, and no real call possible.
+- Prepared a safe dry-readiness project with one scene, a served `image_url`,
+  an `enhanced_video_prompt`, zero video segments, project video duration below
+  cap, and enough credits for one future 5-second segment.
+- Confirmed the future SSM path remains
+  `/ai-series-studio/providers/video/luma/api-key`; the resolver reports
+  `key_present=false` until a backend-readable SecureString is deliberately
+  added later.
+- Added a dry-readiness section to the Luma runbook. No real Luma calls, video
+  generation, feature flag enablement, API key inputs, or runtime behavior
+  changes were made.
+
 ## Auth Plan
 - `docs/AUTH_PLAN.md` compares Emergent Google login, custom JWT auth, and
   future multi-tenant team support.

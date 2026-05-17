@@ -210,6 +210,8 @@ decision and are not enabled.
   logging, mocked unit tests, and disabled-by-default runtime behavior.
 - Completed: add [`docs/LUMA_VIDEO_STAGING_RUNBOOK.md`](LUMA_VIDEO_STAGING_RUNBOOK.md)
   for one controlled 5-second staging/private-beta test.
+- Completed: dry readiness pass with real video still disabled, a prepared
+  single-scene test project, verified credits, and served asset URL.
 - Started with 5-second segments.
 - Keep Expand Next 5 Seconds gated and cost-controlled.
 
