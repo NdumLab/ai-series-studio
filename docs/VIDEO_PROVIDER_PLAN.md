@@ -6,7 +6,9 @@ This plan documents the safest path for the first real video provider. The
 Luma Ray / Dream Machine provider class now exists, but real video remains
 disabled by default and cannot run unless every guard passes: feature flag,
 effective provider, server-side SSM secret, credit guardrails, duration caps,
-generated asset storage, and provider activity logging.
+generated asset storage, and provider activity logging. Real Luma video has
+not been activated yet; staging steps live in
+[`LUMA_VIDEO_STAGING_RUNBOOK.md`](LUMA_VIDEO_STAGING_RUNBOOK.md).
 
 ## Current Video Workflow
 
@@ -322,6 +324,10 @@ Rollback should not affect:
 - existing stored video assets
 
 ## Private Beta Test Plan
+
+Use [`LUMA_VIDEO_STAGING_RUNBOOK.md`](LUMA_VIDEO_STAGING_RUNBOOK.md) for the
+first controlled one-segment activation. Do not enable real video until that
+checklist is complete.
 
 Start narrow:
 

@@ -79,7 +79,8 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 - Current MVP status: mock-first workflow is mature; real LLM is gated and
   available for text operations; real OpenAI image is implemented but disabled
   by default; Luma video is implemented but disabled by default; voice/music/
-  export remain mock-only.
+  export remain mock-only. The Luma staging/private-beta runbook exists, but
+  real video has not been activated yet.
 - 100% MVP still requires real image staging/private-beta enablement, real
   video segments, real voice/music or upload fallback, real FFmpeg export,
   production object storage configuration, deployment, and end-to-end real
@@ -197,6 +198,21 @@ provider activity logging.
 - No real image API calls, real video provider work, frontend API key inputs,
   Stripe changes, real LLM changes, or real video/voice/music/export provider
   connections were added.
+
+## Iteration 39 (2026-05) — Luma video staging runbook
+
+- Added `docs/LUMA_VIDEO_STAGING_RUNBOOK.md` for a future controlled real Luma
+  5-second video segment test.
+- Documented required backend-only env vars, the SSM SecureString path
+  `/ai-series-studio/providers/video/luma/api-key`, provider status checks,
+  one-segment test steps, asset storage verification, credit deduction
+  verification, provider activity verification, cost safety notes, and rollback
+  to mock mode.
+- Reaffirmed that Luma provider code exists, but `USE_REAL_VIDEO_PROVIDER`
+  remains disabled by default and real Luma video has not been activated yet.
+- No runtime behavior changed. No real Luma calls, frontend API key inputs,
+  Stripe changes, real LLM changes, real image changes, or voice/music/export
+  provider connections were added.
 
 ## Auth Plan
 - `docs/AUTH_PLAN.md` compares Emergent Google login, custom JWT auth, and

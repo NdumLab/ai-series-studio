@@ -33,6 +33,8 @@ Controlled staging/private-beta enablement steps are documented in
 
 Real video provider planning is documented in
 [docs/VIDEO_PROVIDER_PLAN.md](/home/ec2-user/ai-series-studio/docs/VIDEO_PROVIDER_PLAN.md).
+Controlled Luma staging/private-beta enablement steps are documented in
+[docs/LUMA_VIDEO_STAGING_RUNBOOK.md](/home/ec2-user/ai-series-studio/docs/LUMA_VIDEO_STAGING_RUNBOOK.md).
 
 ## Current Product State
 
@@ -67,7 +69,8 @@ Real video provider planning is documented in
   effective video provider is `luma`, a backend SSM secret exists at
   `SSM_PROVIDER_KEY_PREFIX/video/luma/api-key`, user credits pass, duration
   caps pass, and generated MP4 storage succeeds. When any guard fails, the
-  existing mock video flow continues and provider activity remains safe.
+  existing mock video flow continues and provider activity remains safe. Real
+  Luma video has not been activated yet.
 - Voice, music, and export providers remain mock-only.
 - A backend-only secrets resolver foundation exists. It defaults to disabled
   mode and can later resolve provider API keys from AWS SSM Parameter Store
@@ -429,6 +432,7 @@ Completed:
 - Real video provider integration plan.
 - Video provider guard foundation.
 - Real Luma video provider behind disabled-by-default guards.
+- Luma video staging/private-beta runbook.
 
 Still remaining before paid MVP:
 

@@ -53,7 +53,8 @@ Completed today:
   `USE_REAL_VIDEO_PROVIDER=true`, effective provider `luma`, backend-only SSM
   secret resolution, credit checks, scene/project duration caps, provider
   activity logging, and generated MP4 asset storage. It is disabled by default;
-  mock video generation remains the default path when any guard fails.
+  mock video generation remains the default path when any guard fails. Real
+  Luma video has not been activated yet.
 - Mock remaining non-LLM providers: Voice, Music, and Export remain mock-only.
 - Cost tracking: operation costs, project/scene estimates, wallet ring,
   high-cost scene warnings, trend deltas, reduce-to-draft, per-user credit
@@ -117,6 +118,7 @@ Completed:
 - [x] Real video provider guard design and implementation plan.
 - [x] Video provider guard foundation.
 - [x] Real Luma video provider behind disabled-by-default guards.
+- [x] Luma video staging/private-beta runbook.
 
 Remaining:
 
@@ -196,7 +198,8 @@ decision and are not enabled.
   server-side secret resolver, user credit checks, asset storage, provider
   activity logging, and clear failure handling.
 - Scene image and character image generation paths are supported.
-- Keep video mocked.
+- Keep real video disabled during image staging unless a separate Luma staging
+  runbook activation is deliberately underway.
 
 ### Phase 5: Real video provider
 
@@ -205,6 +208,8 @@ decision and are not enabled.
 - Completed: implement Luma Ray / Dream Machine provider class behind feature
   flag, server-side SSM secret, credit checks, asset storage, provider activity
   logging, mocked unit tests, and disabled-by-default runtime behavior.
+- Completed: add [`docs/LUMA_VIDEO_STAGING_RUNBOOK.md`](LUMA_VIDEO_STAGING_RUNBOOK.md)
+  for one controlled 5-second staging/private-beta test.
 - Started with 5-second segments.
 - Keep Expand Next 5 Seconds gated and cost-controlled.
 
