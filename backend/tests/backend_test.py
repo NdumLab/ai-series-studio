@@ -2050,8 +2050,10 @@ def _assert_record_is_safe(rec):
         if isinstance(v, str):
             for needle in _SECRET_FORBIDDEN_SUBSTRINGS:
                 assert needle not in v, f"Secret-like substring '{needle}' found in {k}"
-    # 4. Non-LLM modalities must NEVER report a configured key in Phase 2B.
-    if rec["modality"] != "llm":
+    # 4. Modalities without connected real providers must not report a key.
+    # Image is real-capable now, so key_present=true is valid safe metadata for
+    # real image activity as long as no secret value is exposed.
+    if rec["modality"] in ("video", "voice", "music", "export"):
         assert rec["key_present"] is False
 
 
