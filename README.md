@@ -55,6 +55,10 @@ provider is connected yet.
   FastAPI can serve local generated assets from `/assets`, and S3/R2 remain
   planned production backends. Mock image generation records asset metadata but
   does not download remote mock files.
+- Generated asset metadata is stored in MongoDB in the `assets` collection.
+  Raw binary files are not stored in MongoDB. Supported asset types are
+  `character_image`, `scene_image`, `video_segment`, `voice_audio`,
+  `music_audio`, and `export_video`.
 
 ## Reorder Endpoints
 
@@ -175,9 +179,9 @@ delivery.
 
 ## Credit Wallet
 
-MVP credit ownership is implemented without Stripe checkout or webhooks. Each
-user record stores available, reserved, and used credits. Local/demo mode uses
-the seeded `user-demo` wallet.
+MVP credit ownership is implemented with test-mode Stripe fulfillment support.
+Each user record stores available, reserved, and used credits. Local/demo mode
+uses the seeded `user-demo` wallet.
 
 ```http
 GET /api/credits/status
@@ -377,24 +381,26 @@ Completed:
 - Background purge scheduler.
 - Developer reproducibility.
 - Stripe test-mode readiness gate.
+- Auth and project ownership.
+- User-owned credit wallet.
+- Stripe test checkout/webhook.
+- Server-side secrets resolver foundation.
+- Generated asset storage foundation.
 
 Still remaining before paid MVP:
 
-- Production auth/user ownership hardening.
-- Real credit wallet tied to users and Stripe fulfillment.
-- Stripe checkout/session creation and webhooks.
 - Real Image provider.
 - Real Video provider.
 - Real Voice provider.
 - Real Music provider.
 - Real Export / FFmpeg worker.
-- Asset storage.
 - Public sharing.
 - Multi-tenant teams.
 - Versioned scene revisions.
 
-Auth and project ownership must stay ahead of real Stripe checkout/webhook work
-because billing and credits need a reliable user owner.
+Next recommended implementation: real OpenAI `gpt-image-1` provider, disabled
+by default and gated behind `USE_REAL_IMAGE_PROVIDER=true`, server-side secret
+resolver, credit guardrails, asset storage, and provider activity logging.
 
 ## Useful Paths
 

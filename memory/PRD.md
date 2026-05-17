@@ -65,41 +65,38 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 - Current MVP status: mock-first workflow is mature; real LLM is gated and
   available for text operations; image/video/voice/music/export remain
   mock-only.
-- 100% MVP still requires production auth/user ownership hardening, a real
-  Stripe credit fulfillment, Stripe checkout/session creation and webhooks,
-  real image generation, real video segments, real
-  voice/music or upload fallback, real FFmpeg export, durable object storage,
-  deployment, and end-to-end real media validation.
+- 100% MVP still requires real image generation, real video segments, real
+  voice/music or upload fallback, real FFmpeg export, production object
+  storage configuration, deployment, and end-to-end real media validation.
 - Recommended build order:
-  1. Production auth/user ownership hardening.
-  2. Stripe checkout/session creation and webhook credit fulfillment.
-  3. Production credit fulfillment tied to users.
-  4. Real image provider.
-  5. Real video provider.
-  6. Real voice/music.
-  7. Real export.
-  8. Private beta.
+  1. Real image provider behind feature flag, server-side secret resolver,
+     credit guardrails, asset storage, and provider activity logging.
+  2. Real video provider.
+  3. Real voice/music.
+  4. Real export.
+  5. Production storage configuration.
+  6. Private beta.
 - Launch-ready criteria include working auth, credits, real LLM, real image,
   real video, MP4 export, storage, cost limits, admin monitoring, full passing
   tests, three successful sample episodes, and understood internal cost per
   1-minute video.
 
 ## Backlog (P2)
-- Production auth/user ownership hardening.
-- Stripe credit fulfillment tied to users.
 - Production Stripe hardening / live billing decision.
 - Real Image provider.
 - Real Video provider.
 - Real Voice provider.
 - Real Music provider.
 - Real Export / FFmpeg worker.
-- Asset storage.
+- Production S3/R2 storage configuration.
 - Public sharing.
 - Multi-tenant teams.
 - Versioned scene revisions.
 
-Auth and user ownership must come before real Stripe checkout/webhook work
-because billing and credit fulfillment need a reliable user owner.
+Auth, user ownership, wallet guardrails, and Stripe test-mode fulfillment are
+now in place. Real media providers should still remain blocked until each
+provider has server-side secrets, credit controls, durable asset storage, and
+provider activity logging.
 
 ## Auth Plan
 - `docs/AUTH_PLAN.md` compares Emergent Google login, custom JWT auth, and
@@ -109,8 +106,8 @@ because billing and credit fulfillment need a reliable user owner.
   deployment platform provides it cleanly, and defer multi-tenant teams until
   after the single-user paid MVP works.
 - `AUTH_DEMO_MODE=true` remains local-only; production/private beta should use
-  authenticated users and real project ownership before Stripe checkout,
-  webhooks, or paid provider calls.
+  authenticated users and real project ownership before live billing or paid
+  provider calls.
 
 ## Iteration 25 (2026-05) — MVP auth and ownership
 - Added local email/password auth endpoints:
@@ -230,6 +227,8 @@ because billing and credit fulfillment need a reliable user owner.
 - Added S3/R2 backend stubs without requiring AWS credentials.
 - Added `assets` metadata record shape for generated assets; raw binary data is
   not stored in MongoDB.
+- Asset types include `character_image`, `scene_image`, `video_segment`,
+  `voice_audio`, `music_audio`, and `export_video`.
 - Mock scene image generation now creates an asset metadata record for the
   selected external mock URL while preserving the existing `image_url` response.
 - Purge flow deletes asset metadata for purged projects; future local/S3 object
@@ -431,15 +430,12 @@ because billing and credit fulfillment need a reliable user owner.
   Deleted admin panel, background purge scheduler.
 
 ## Backlog (P2)
-- Production auth/user ownership hardening.
-- Real credit wallet tied to users and Stripe fulfillment.
-- Stripe checkout/session creation and webhooks.
 - Real Image provider.
 - Real Video provider.
 - Real Voice provider.
 - Real Music provider.
 - Real Export / FFmpeg worker.
-- Asset storage.
+- Production S3/R2 storage configuration.
 - Public sharing.
 - Multi-tenant teams.
 - Versioned scene revisions.
@@ -825,14 +821,15 @@ drag behavior for characters.
 - Real LLM is gated behind `USE_REAL_LLM_PROVIDER`.
 - Image / Video / Voice / Music / Export providers remain mock-only.
 
-### Backlog after Iteration 24
+### Backlog after Iteration 32
 - P1 completed: Character drag handles in Cast view; Safe delete / Undo delete;
   Recently Deleted admin panel; Background purge scheduler.
-- P2 remaining has since moved on: production auth/user ownership hardening,
-  real credit wallet tied to users and Stripe fulfillment, Stripe checkout/
-  webhook work, real Image/Video/Voice/Music providers, Real Export/FFmpeg
-  worker, asset storage, Public sharing, Multi-tenant teams, and Versioned
-  scene revisions.
+- Completed since Iteration 24: auth and project ownership, user-owned credit
+  wallet, Stripe test checkout/webhook fulfillment, server-side secrets
+  resolver foundation, and generated asset storage foundation.
+- P2 remaining: real Image/Video/Voice/Music providers, Real Export/FFmpeg
+  worker, production S3/R2 storage configuration, Public sharing,
+  Multi-tenant teams, and Versioned scene revisions.
 
 
 ## Iteration 21 (2026-02) — Phase 2B: Real LLM provider (LLM modality only)

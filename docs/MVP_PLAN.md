@@ -44,6 +44,8 @@ Completed today:
 - Asset storage foundation: backend storage abstraction exists with local
   storage/default asset metadata records and S3/R2 stubs. Mock image generation
   records generated asset metadata without enabling real image calls.
+  Asset metadata is stored in the database; raw generated binary data is not
+  stored in MongoDB.
 - Real LLM gating: real LLM support exists for story/text operations behind
   `USE_REAL_LLM_PROVIDER`, with mock fallback.
 - Mock non-LLM providers: Image, Video, Voice, Music, and Export remain
@@ -108,7 +110,6 @@ Completed:
 Remaining:
 
 - [x] Production auth/user ownership hardening before paid billing.
-- [ ] Stripe credit fulfillment tied to real users.
 - [ ] Real image provider.
 - [ ] Real video provider.
 - [ ] Real voice provider.
@@ -123,8 +124,8 @@ Remaining:
 ## E. Recommended Build Order From Here
 
 Auth planning and production hardening details live in
-[`docs/AUTH_PLAN.md`](AUTH_PLAN.md). Auth/user ownership must remain ahead of
-real Stripe checkout, webhook fulfillment, and paid provider work.
+[`docs/AUTH_PLAN.md`](AUTH_PLAN.md). Auth/user ownership is now in place and
+must remain the base for any future live billing or paid provider work.
 
 ### Phase 1: Auth and ownership
 
@@ -144,8 +145,6 @@ real Stripe checkout, webhook fulfillment, and paid provider work.
   credits after successful generation.
 - Completed: add insufficient-credit blocking.
 - Completed: record `credit_events` and show credit usage in Admin.
-- Remaining: Stripe test metering belongs to Phase 3 after wallet logic is
-  stable.
 
 ### Phase 3: Stripe test metering
 
@@ -163,9 +162,9 @@ real Stripe checkout, webhook fulfillment, and paid provider work.
   implemented.
 - Live payments remain disabled.
 
-Important roadmap note: production-grade auth/user ownership must be settled
-before real Stripe checkout and webhook work because billing and credit
-fulfillment need reliable user ownership.
+Important roadmap note: production-grade auth/user ownership is now the base
+for test-mode Stripe fulfillment. Live payments remain a separate future
+decision and are not enabled.
 
 ### Phase 4: Real image provider
 
@@ -174,11 +173,11 @@ fulfillment need reliable user ownership.
 - Completed: add server-side secrets resolver with AWS SSM Parameter Store
   SecureString support.
 - Completed: add generated asset storage abstraction and asset metadata records.
-- Next implementation gate: implement real image provider behind mocks/tests,
-  still disabled by default.
-- Then add one real image provider behind `USE_REAL_IMAGE_PROVIDER=true`,
-  server-side key presence, user credit checks, provider activity logging, and
-  storage controls.
+- Next implementation: add real OpenAI `gpt-image-1` provider behind
+  mocks/tests, still disabled by default.
+- Real image execution must be gated behind `USE_REAL_IMAGE_PROVIDER=true`,
+  server-side secret resolver, user credit checks, asset storage, provider
+  activity logging, and clear failure handling.
 - Generate scene images first, then character images.
 - Keep video mocked.
 

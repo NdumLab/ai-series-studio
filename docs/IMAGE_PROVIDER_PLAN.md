@@ -205,6 +205,18 @@ Current implementation status:
   yet.
 - Raw binary data is not stored in MongoDB.
 
+Local/test placeholders only:
+
+```bash
+ASSET_STORAGE_BACKEND=local
+ASSET_LOCAL_DIR=./generated_assets
+ASSET_PUBLIC_BASE_URL=http://localhost:8000/assets
+ASSET_S3_BUCKET=
+ASSET_S3_REGION=us-east-1
+ASSET_S3_PREFIX=ai-series-studio
+ASSET_SIGNED_URL_EXPIRE_SECONDS=3600
+```
+
 Asset records use the `assets` collection with:
 
 - `id`
@@ -222,6 +234,15 @@ Asset records use the `assets` collection with:
 - `provider_job_id`
 - `created_at`
 
+Supported asset types:
+
+- `character_image`
+- `scene_image`
+- `video_segment`
+- `voice_audio`
+- `music_audio`
+- `export_video`
+
 Do not rely on temporary provider URLs for launch. Before broad real image
 enablement, choose one:
 
@@ -231,6 +252,16 @@ enablement, choose one:
 
 For MVP production, S3/R2 storage should happen before enabling broad private
 beta image generation.
+
+Current safety status:
+
+- No real image provider is connected yet.
+- No real image API calls are made.
+- No real video, voice, music, or export providers are connected.
+- No frontend API key inputs exist.
+- No AWS credentials are committed or required for local storage mode.
+- Stripe behavior is unchanged.
+- Real LLM behavior is unchanged.
 
 ## Frontend UX Plan
 
@@ -274,8 +305,8 @@ Frontend tests/checks:
 
 1. Add secrets resolver abstraction with SSM placeholder support.
 2. Add image key-present checks, still returning false by default.
-3. Add real image provider class behind unit-test mocks.
-4. Add storage abstraction for generated images.
+3. Add storage abstraction for generated images. Completed.
+4. Add real OpenAI `gpt-image-1` provider class behind unit-test mocks.
 5. Enable in a local/staging test environment with fake or test provider client.
 6. Run capped private beta with low per-user credits.
 7. Review provider activity, failure rate, and cost per generated image.
