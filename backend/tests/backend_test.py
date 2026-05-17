@@ -611,8 +611,8 @@ def test_create_segment_and_expand(s, scene_id):
 
 
 def test_expand_chain_links_parents(s, project_id):
-    """A fresh scene + 3 expansions must produce a linked chain with correct
-    start_second progression and parent ids."""
+    """A fresh scene can reach the default 3-segment cap with correct parent
+    links, then the 4th segment is blocked by the MVP guardrail."""
     r = s.post(f"{API}/projects/{project_id}/scenes", json={"title": "TEST_Chain", "duration": 5})
     sid = r.json()["id"]
 
@@ -626,7 +626,7 @@ def test_expand_chain_links_parents(s, project_id):
     assert first["continuity_prompt"] == "moody neon street"
 
     prev = first
-    for i in range(1, 4):
+    for i in range(1, 3):
         r = _retry(lambda: s.post(f"{API}/scenes/{sid}/expand",
                                   json={"continuity_prompt": f"continuation {i}"}))
         assert r.status_code == 200, r.text
@@ -638,6 +638,11 @@ def test_expand_chain_links_parents(s, project_id):
         assert cur["duration"] == 5
         assert cur["continuity_prompt"] == f"continuation {i}"
         prev = cur
+
+    blocked = s.post(f"{API}/scenes/{sid}/expand",
+                     json={"continuity_prompt": "over cap"})
+    assert blocked.status_code == 400
+    assert blocked.json()["detail"] == "Video segment limit reached for this MVP."
 
     # cleanup
     s.delete(f"{API}/scenes/{sid}")
@@ -1220,19 +1225,23 @@ def test_studio_config_endpoint(s):
 
 
 def test_scene_costs_includes_wallet_pct_and_state(s):
-    """Default wallet=250. With 6 mock-split scenes (each 15) → grand 90 → 36% (warning border-line normal)."""
+    """Scene costs use the current wallet after paid rewrite/split deductions."""
     p = s.post(f"{API}/projects", json={"title": "TEST_Wallet", "idea": "x"}).json()
     pid = p["id"]
     try:
+        before = s.get(f"{API}/credits/status").json()
         s.post(f"{API}/projects/{pid}/rewrite")
         s.post(f"{API}/projects/{pid}/split-scenes")
+        after = s.get(f"{API}/credits/status").json()
+        assert after["credits_available"] == before["credits_available"] - 7
+
         d = s.get(f"{API}/projects/{pid}/scene-costs").json()
-        assert d["wallet_credits"] == 250
+        assert d["wallet_credits"] == after["credits_available"]
         assert d["high_cost_scene_threshold_percent"] == 25
         # 6 scenes × 15 = 90
         assert d["grand_total_credits"] == 90
-        assert d["wallet_pct"] == 36.0
-        assert d["wallet_state"] == "normal"  # 36% < 41%
+        assert d["wallet_pct"] == round(90 / after["credits_available"] * 100, 1)
+        assert d["wallet_state"] == "normal"
         # Each scene = 15/90 ≈ 16.7% → below 25% → not high-cost
         for sc in d["scenes"]:
             assert sc["share_pct"] == round(15 / 90 * 100, 1)
@@ -1287,17 +1296,18 @@ def test_high_cost_scene_flag_with_configurable_threshold(s):
         s.post(f"{API}/projects/{pid}/split-scenes")
         scenes = s.get(f"{API}/projects/{pid}").json()["scenes"]
         big = scenes[0]
-        # 4 expansions → 4 segments under big → big total = 2 + 12*4 + 1 = 51
-        # Other 5 scenes stay at 15 each → grand = 51 + 75 = 126
-        # big share = 51/126 ≈ 40.5%, other share = 15/126 ≈ 11.9%
-        for _ in range(4):
+        # Default cap allows 3 segments under big → total = 2 + 12*3 + 1 = 39
+        # Other 5 scenes stay at 15 each → grand = 39 + 75 = 114
+        # big share = 39/114 ≈ 34.2%, other share = 15/114 ≈ 13.2%
+        for _ in range(3):
             _retry(lambda: s.post(f"{API}/scenes/{big['id']}/expand"))
 
         # Default threshold (25%): only big crosses
         d = s.get(f"{API}/projects/{pid}/scene-costs").json()
         assert d["high_cost_scene_threshold_percent"] == 25
         big_row = next(r for r in d["scenes"] if r["scene_id"] == big["id"])
-        assert big_row["total_credits"] == 51
+        assert big_row["segments_count"] == 3
+        assert big_row["total_credits"] == 39
         assert big_row["share_pct"] > 25
         assert big_row["high_cost"] is True
         for r in d["scenes"]:
@@ -1337,14 +1347,18 @@ def test_list_projects_includes_cost_summary(s):
     p = s.post(f"{API}/projects", json={"title": "TEST_DashSum", "idea": "x"}).json()
     pid = p["id"]
     try:
+        before = s.get(f"{API}/credits/status").json()
         s.post(f"{API}/projects/{pid}/rewrite")
         s.post(f"{API}/projects/{pid}/split-scenes")
+        after = s.get(f"{API}/credits/status").json()
+        assert after["credits_available"] == before["credits_available"] - 7
+
         listing = s.get(f"{API}/projects").json()
         row = next(r for r in listing if r["id"] == pid)
         cs = row["cost_summary"]
         assert cs["grand_total_credits"] == 90  # 6 scenes × 15
-        assert cs["wallet_credits"] == 250
-        assert cs["wallet_pct"] == 36.0
+        assert cs["wallet_credits"] == after["credits_available"]
+        assert cs["wallet_pct"] == round(90 / after["credits_available"] * 100, 1)
         assert cs["wallet_state"] == "normal"
         assert cs["estimate_unavailable"] is False
     finally:
@@ -1352,25 +1366,30 @@ def test_list_projects_includes_cost_summary(s):
 
 
 def test_dashboard_summary_handles_insufficient_state(s):
-    """A project that exceeds the wallet (via query override on /scene-costs) must
-    surface the 'insufficient' state. /projects always uses default wallet=250, so
-    we drive the pct via segments instead — 22 expansions beyond split → grand >
-    250."""
+    """Dashboard summary can show insufficient after paid video generations
+    reduce the current wallet, without violating per-scene segment caps."""
     p = s.post(f"{API}/projects", json={"title": "TEST_Insuff", "idea": "x"}).json()
     pid = p["id"]
     try:
         s.post(f"{API}/projects/{pid}/rewrite")
         s.post(f"{API}/projects/{pid}/split-scenes")  # 6 scenes, 90 credits
         scenes = s.get(f"{API}/projects/{pid}").json()["scenes"]
-        # Add 14 expansions to scene[0] → scene total = 2 + 12*14 + 1 = 171
-        # Total = 171 + 5*15 = 246  → still under 250
-        # Add 1 more expansion → 183 + 75 = 258 → over 250 → insufficient
-        for _ in range(15):
-            _retry(lambda: s.post(f"{API}/scenes/{scenes[0]['id']}/expand"))
+        # Add two segments per scene. This stays under the default 60-second
+        # project cap while spending enough credits to make the current wallet
+        # lower than the estimate:
+        # grand_total = 6 × (2 + 12*2 + 1) = 162.
+        # The 12 video generations spend 144 credits, leaving the wallet below
+        # the current estimate and making the dashboard insufficient.
+        for sc in scenes:
+            for _ in range(2):
+                r = _retry(lambda sc_id=sc["id"]: s.post(f"{API}/scenes/{sc_id}/expand"))
+                assert r.status_code == 200, r.text
+
         listing = s.get(f"{API}/projects").json()
         row = next(r for r in listing if r["id"] == pid)
         cs = row["cost_summary"]
-        assert cs["grand_total_credits"] > 250
+        assert cs["grand_total_credits"] == 162
+        assert cs["wallet_credits"] < cs["grand_total_credits"]
         assert cs["wallet_state"] == "insufficient"
     finally:
         s.delete(f"{API}/projects/{pid}")
@@ -1461,30 +1480,34 @@ def test_reduce_to_draft_basic_and_idempotent(s):
             f"{API}/projects/{pid}/scenes",
             json={"title": "TEST_R", "duration": 10},
         ).json()
-        # Add 4 segments under the scene (1 generate + 3 expansions)
+        # Add the default max 3 segments under the scene (1 generate + 2 expansions)
         _retry(lambda: s.post(f"{API}/scenes/{sc['id']}/segments"))
-        for _ in range(3):
+        for _ in range(2):
             _retry(lambda: s.post(f"{API}/scenes/{sc['id']}/expand"))
-        # Sanity: 4 segments, scene total = 2 + 12*4 + 1 = 51
+        # Sanity: 3 segments, scene total = 2 + 12*3 + 1 = 39
         cs = s.get(f"{API}/projects/{pid}/scene-costs").json()
         row = next(r for r in cs["scenes"] if r["scene_id"] == sc["id"])
-        assert row["segments_count"] == 4
-        assert row["total_credits"] == 51
+        assert row["segments_count"] == 3
+        assert row["total_credits"] == 39
+
+        blocked = s.post(f"{API}/scenes/{sc['id']}/expand")
+        assert blocked.status_code == 400
+        assert blocked.json()["detail"] == "Video segment limit reached for this MVP."
 
         before_total = cs["grand_total_credits"]
         r = s.post(f"{API}/scenes/{sc['id']}/reduce-to-draft")
         assert r.status_code == 200
         d = r.json()
         assert d["mock_mode"] is True
-        assert d["deleted_segments"] == 3
-        assert d["saved_credits"] == 36  # 3 × 12
+        assert d["deleted_segments"] == 2
+        assert d["saved_credits"] == 24  # 2 × 12
         assert len(d["segments"]) == 1   # only earliest kept
 
         cs2 = s.get(f"{API}/projects/{pid}/scene-costs").json()
         row2 = next(r for r in cs2["scenes"] if r["scene_id"] == sc["id"])
         assert row2["segments_count"] == 1
         assert row2["total_credits"] == 15
-        assert before_total - cs2["grand_total_credits"] == 36
+        assert before_total - cs2["grand_total_credits"] == 24
 
         # Idempotent: running again deletes nothing
         r = s.post(f"{API}/scenes/{sc['id']}/reduce-to-draft").json()
