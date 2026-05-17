@@ -464,6 +464,77 @@ def test_successful_mocked_luma_video_saves_asset_and_updates_segment(monkeypatc
     assert fake_db.users.rows[0]["credits"] == 250 - server.COSTS["video_segment"]
 
 
+def test_real_luma_expand_uses_previous_generation_id(monkeypatch, tmp_path):
+    monkeypatch.setenv("USE_REAL_VIDEO_PROVIDER", "true")
+    monkeypatch.setattr(provider_executor, "key_present_for_modality", lambda *_: True)
+    monkeypatch.setattr(provider_executor, "key_status_for_modality", lambda *_: "configured")
+    monkeypatch.setattr("providers.video_luma.get_provider_secret_value", lambda *_: "luma-secret")
+    cfg = server.storage_config({
+        "ASSET_STORAGE_BACKEND": "local",
+        "ASSET_LOCAL_DIR": str(tmp_path),
+        "ASSET_PUBLIC_BASE_URL": "https://assets.example.com/assets",
+    })
+    monkeypatch.setattr(server, "ASSET_STORAGE_CONFIG", cfg)
+    previous = {
+        "id": "seg-1",
+        "scene_id": "scene-1",
+        "project_id": "project-1",
+        "order": 0,
+        "start_second": 0,
+        "duration": 5,
+        "provider_job_id": "luma-job-previous",
+        "video_url": "https://assets.example.com/assets/previous.mp4",
+    }
+    fake_db = _FakeDB(
+        segments=[previous],
+        scene={
+            "id": "scene-1",
+            "project_id": "project-1",
+            "visual_prompt": "Wide shot",
+            "enhanced_video_prompt": "Continue the lighthouse shot",
+            "image_url": None,
+        },
+    )
+    monkeypatch.setattr(server, "db", fake_db)
+
+    class _FakeLumaClient:
+        def create_generation(self, **kwargs):
+            assert kwargs["expand_mode"] == "expand"
+            assert kwargs["parent_provider_job_id"] == "luma-job-previous"
+            assert kwargs["parent_video_url"] == "https://assets.example.com/assets/previous.mp4"
+            assert kwargs["image_url"] is None
+            return {"id": "luma-job-expanded", "state": "queued"}
+
+        def get_generation(self, provider_job_id):
+            assert provider_job_id == "luma-job-expanded"
+            return {
+                "id": provider_job_id,
+                "state": "completed",
+                "assets": {"video": "https://luma.example/expanded.mp4"},
+            }
+
+        def download_asset(self, video_url):
+            assert video_url == "https://luma.example/expanded.mp4"
+            return b"expanded-video-bytes"
+
+    LumaVideoProvider.client_factory = lambda _api_key: _FakeLumaClient()
+
+    out = _run(server._create_scene_segment(
+        "scene-1",
+        expand_mode="expand",
+        continuity_prompt="Continue the lighthouse shot",
+        user={"id": "user-1"},
+    ))
+
+    assert out["parent_segment_id"] == "seg-1"
+    assert out["start_second"] == 5
+    assert out["expand_mode"] == "expand"
+    assert out["provider_job_id"] == "luma-job-expanded"
+    assert out["generation_mode"] == "real"
+    assert fake_db.segments.rows[-1]["parent_segment_id"] == "seg-1"
+    assert fake_db.assets.rows[0]["provider_job_id"] == "luma-job-expanded"
+
+
 def test_luma_http_client_uses_documented_video_endpoint_and_payload(monkeypatch):
     requests = []
 

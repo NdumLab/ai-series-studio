@@ -69,8 +69,10 @@ Controlled Luma staging/private-beta enablement steps are documented in
   effective video provider is `luma`, a backend SSM secret exists at
   `SSM_PROVIDER_KEY_PREFIX/video/luma/api-key`, user credits pass, duration
   caps pass, and generated MP4 storage succeeds. When any guard fails, the
-  existing mock video flow continues and provider activity remains safe. Real
-  Luma video has not been activated yet.
+  existing mock video flow continues and provider activity remains safe. One
+  controlled initial 5-second Luma generation and one controlled Expand Next 5
+  Seconds generation have been validated; real video remains disabled by
+  default after tests.
 - Voice, music, and export providers remain mock-only.
 - A backend-only secrets resolver foundation exists. It defaults to disabled
   mode and can later resolve provider API keys from AWS SSM Parameter Store

@@ -49,6 +49,8 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
   single-image activation guard. Luma video support exists but is disabled by
   default and guarded by feature flag, effective provider, server-side SSM
   secret, credits, duration caps, storage, and provider activity logging.
+  Controlled initial and Expand Next 5 Seconds real Luma generation have been
+  validated with real providers disabled again afterward.
   Voice/music/export remain mock-only.
 - Real image provider planning and guard details are documented in
   `docs/IMAGE_PROVIDER_PLAN.md`.
@@ -229,6 +231,19 @@ provider activity logging.
 - Added a dry-readiness section to the Luma runbook. No real Luma calls, video
   generation, feature flag enablement, API key inputs, or runtime behavior
   changes were made.
+
+## Iteration 41 (2026-05) — Controlled real Luma expand validation
+
+- Ran one controlled real Luma Expand Next 5 Seconds test after an existing
+  real initial 5-second segment.
+- Verified the expanded segment preserved `parent_segment_id`, `start_second`,
+  `duration`, `expand_mode`, `provider_name`, `provider_job_id`, and stored
+  `video_url`.
+- Verified local asset metadata, public byte-range MP4 serving, credit
+  deduction, and safe provider activity metadata.
+- Rolled `USE_REAL_VIDEO_PROVIDER=false` back after the controlled paid test.
+- Added regression coverage to ensure real Luma expansion passes the previous
+  provider generation id into the Dream Machine generations API path.
 
 ## Auth Plan
 - `docs/AUTH_PLAN.md` compares Emergent Google login, custom JWT auth, and

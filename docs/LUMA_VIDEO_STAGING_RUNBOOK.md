@@ -26,7 +26,9 @@ generation during the first activation pass.
   secrets backend, key presence, real capability, and ready/blocked/mock state.
 - Voice, music, and export providers remain mock-only.
 - No frontend API key inputs exist.
-- Real video has not been activated yet.
+- Controlled real video activation has been validated for one initial
+  5-second segment and one Expand Next 5 Seconds segment. Real video remains
+  disabled by default after tests.
 
 ## Required Environment
 
@@ -189,6 +191,41 @@ Expected:
 - Exactly one video segment cost is deducted.
 
 Do not use Expand Next 5 Seconds during the first real test.
+
+## Test One Expand Next 5 Seconds Segment
+
+Run this only after one initial real 5-second segment exists and real video
+mode is deliberately enabled for the controlled test.
+
+1. Record current credits from `GET /api/credits/status`.
+2. Confirm the scene has exactly one previous segment to extend.
+3. Confirm the previous segment has:
+   - `provider_name=luma`
+   - `provider_job_id` present
+   - `video_url` pointing to a served MP4 asset
+4. Generate exactly one expansion:
+
+```bash
+curl -X POST -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"continuity_prompt":"Continue the shot for the next five seconds."}' \
+  "http://localhost:8000/api/scenes/<scene_id>/expand"
+```
+
+Expected:
+
+- `duration=5`.
+- `generation_mode=real`.
+- `provider_name=luma`.
+- `provider_job_id` is present.
+- `parent_segment_id` points to the previous segment.
+- `start_second` equals the previous segment end time.
+- `expand_mode=expand`.
+- `video_url` points to configured asset storage.
+- Exactly one video segment cost is deducted after the expanded MP4 is stored.
+
+After the test, immediately roll back `USE_REAL_VIDEO_PROVIDER=false`, restart
+the backend, and verify `/api/providers/video/status` reports mock mode.
 
 ## Verify Asset Storage
 

@@ -119,12 +119,12 @@ Completed:
 - [x] Video provider guard foundation.
 - [x] Real Luma video provider behind disabled-by-default guards.
 - [x] Luma video staging/private-beta runbook.
+- [x] Controlled real Luma initial segment and Expand Next 5 Seconds validation.
 
 Remaining:
 
 - [x] Production auth/user ownership hardening before paid billing.
 - [ ] Real image staging rollout and private-beta enablement.
-- [ ] Real video private-beta validation.
 - [ ] Real voice provider.
 - [ ] Real music/SFX provider.
 - [ ] Real FFmpeg export worker.
