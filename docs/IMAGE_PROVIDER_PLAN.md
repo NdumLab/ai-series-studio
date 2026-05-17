@@ -175,30 +175,32 @@ provider spend and adjusted so one app credit has a stable internal value.
 
 ## Backend API Design
 
-Implementation outline for a future code pass:
+Current implementation:
 
-- Add `backend/providers/image_real.py`.
-- Add a `RealImageProvider` class with a `run(prompt, aspect_ratio,
-  reference_image_url, output_kind, safety_context)` method.
-- Use `ProviderResult`:
+- `backend/providers/image_openai.py` contains the guarded OpenAI GPT Image
+  provider.
+- `OpenAIImageProvider.run(...)` accepts a prompt and `image_kind` of `scene`
+  or `character`.
+- The provider returns a `ProviderResult` with:
   - `modality="image"`
   - `mode="real"`
-  - `status="success" | "failed" | "blocked"`
-  - `provider_job_id`
-  - `output={"image_url": ..., "asset_id": ..., "mime_type": ...}`
+  - `status="success" | "failed"`
+  - `provider_job_id` when available
+  - `output={"image_bytes": ..., "mime_type": "image/png", "image_kind": ...}`
   - `error`
-  - `meta={"duration_ms": ..., "image_kind": "scene" | "character"}`
-- Extend `keys.key_present_for_modality("image", provider)` to check only
-  server-side resolved secrets.
-- Extend `execute_provider` with a real image branch, but keep mock fallback
-  explicit and test-covered.
-- Keep `POST /api/scenes/{scene_id}/generate-image` as the first real image
-  endpoint.
-- Add a later character endpoint only when character image UX is ready, for
-  example `POST /api/characters/{character_id}/generate-image`.
+  - `meta={"duration_ms": ..., "image_kind": ..., "size": ..., "quality": ...}`
+- `keys.key_present_for_modality("image", provider)` checks only server-side
+  resolved secrets.
+- `execute_provider` has a real image branch for `openai-image` / `openai` and
+  otherwise keeps mock fallback explicit and test-covered.
+- Scene images use `POST /api/scenes/{scene_id}/generate-image`.
+- Character images use `POST /api/characters/{character_id}/generate-image`.
 
-The future implementation must not return secret values, raw provider request
-payloads, or unfiltered provider metadata to the frontend.
+The implementation must not return secret values, raw provider request
+payloads, raw image bytes, or unfiltered provider metadata to the frontend.
+The public response shape remains `image_url`, `cost`, and
+`remaining_credits` for scenes; character image generation also returns
+`reference_image_url`.
 
 ## Storage Gate
 
@@ -323,6 +325,9 @@ Frontend tests/checks:
    credits.
 6. Run capped private beta with low per-user credits.
 7. Review provider activity, failure rate, and cost per generated image.
+
+Operational staging details live in
+[`docs/REAL_IMAGE_STAGING_RUNBOOK.md`](REAL_IMAGE_STAGING_RUNBOOK.md).
 
 ## Non-Goals Still In Force
 

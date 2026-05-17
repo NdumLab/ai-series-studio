@@ -107,6 +107,7 @@ Completed:
 - [x] Server-side secrets resolver foundation.
 - [x] Generated asset storage foundation.
 - [x] Real OpenAI image provider behind guards.
+- [x] Real image staging/private-beta enablement runbook.
 
 Remaining:
 
@@ -176,6 +177,9 @@ decision and are not enabled.
 - Completed: add generated asset storage abstraction and asset metadata records.
 - Completed: add real OpenAI GPT Image provider behind mocks/tests, disabled
   by default.
+- Completed: add
+  [`docs/REAL_IMAGE_STAGING_RUNBOOK.md`](REAL_IMAGE_STAGING_RUNBOOK.md) for
+  controlled staging/private-beta enablement.
 - Real image execution is gated behind `USE_REAL_IMAGE_PROVIDER=true`,
   server-side secret resolver, user credit checks, asset storage, provider
   activity logging, and clear failure handling.

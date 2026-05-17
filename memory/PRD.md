@@ -119,6 +119,21 @@ provider activity logging.
 - No frontend API key inputs, video/voice/music/export providers, Stripe
   changes, real LLM changes, or real credentials were added.
 
+## Iteration 34 (2026-05) — Real image staging runbook
+- Added `docs/REAL_IMAGE_STAGING_RUNBOOK.md`.
+- Documented required staging envs:
+  `SECRETS_BACKEND=ssm`, `AWS_REGION=us-east-1`,
+  `SSM_PROVIDER_KEY_PREFIX=/ai-series-studio/providers`, and
+  `USE_REAL_IMAGE_PROVIDER=true`.
+- Documented required SSM SecureString path:
+  `/ai-series-studio/providers/image/openai/api-key`.
+- Added enable, disable, rollback, secret verification, scene image test,
+  character image test, asset storage check, credit deduction check,
+  failed-generation no-deduction check, provider activity check, and cost
+  monitoring steps.
+- Reaffirmed that real OpenAI image remains disabled by default and video,
+  voice, music, and export remain mock-only.
+
 ## Auth Plan
 - `docs/AUTH_PLAN.md` compares Emergent Google login, custom JWT auth, and
   future multi-tenant team support.

@@ -26,6 +26,9 @@ The current recommendation is OpenAI `gpt-image-1` as the first MVP image
 provider. The provider class is connected behind guards, but real calls remain
 disabled by default.
 
+Controlled staging/private-beta enablement steps are documented in
+[docs/REAL_IMAGE_STAGING_RUNBOOK.md](/home/ec2-user/ai-series-studio/docs/REAL_IMAGE_STAGING_RUNBOOK.md).
+
 ## Current Product State
 
 - Story, scene, character, image, video segment, voice/music, provider, and
@@ -392,6 +395,7 @@ Completed:
 - Server-side secrets resolver foundation.
 - Generated asset storage foundation.
 - Real OpenAI image provider behind guards.
+- Real image staging/private-beta enablement runbook.
 
 Still remaining before paid MVP:
 
