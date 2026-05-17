@@ -1,9 +1,9 @@
 """Provider service layer for AI Episode Studio.
 
-Phase 2A foundation: defines provider interfaces, mock implementations, a
-resolver (global → project → character) and an execution guard. All real
-providers are blocked by feature flags + missing keys today — only mock
-providers run.
+Defines provider interfaces, mock implementations, a resolver (global →
+project → character) and execution guards. Real LLM, OpenAI image, and Luma
+video providers are disabled by default and require feature flags plus
+server-side runtime/secrets before they can run.
 
 Public surface:
     from providers import (

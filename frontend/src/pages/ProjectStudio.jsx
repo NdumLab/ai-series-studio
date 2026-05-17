@@ -41,7 +41,8 @@ export default function ProjectStudio() {
       Promise.all([
         ProjectProviders.get(id),
         ProjectProviders.status(id, "image").catch(() => null),
-      ]).then(([providerData, imageStatus]) => {
+        ProjectProviders.status(id, "video").catch(() => null),
+      ]).then(([providerData, imageStatus, videoStatus]) => {
         const next = { ...providerData };
         if (imageStatus) {
           next.status = { ...(providerData.status || {}), image: imageStatus };
@@ -55,6 +56,21 @@ export default function ProjectStudio() {
               mode: imageStatus.mode,
               status: imageStatus.status,
               would_use_real_provider: imageStatus.would_use_real_provider,
+            },
+          };
+        }
+        if (videoStatus) {
+          next.status = { ...(next.status || providerData.status || {}), video: videoStatus };
+          next.effective = {
+            ...(next.effective || providerData.effective || {}),
+            video: {
+              ...(providerData.effective?.video || {}),
+              provider: videoStatus.selected_provider || videoStatus.provider,
+              model: videoStatus.selected_model || videoStatus.model,
+              source: videoStatus.source,
+              mode: videoStatus.mode,
+              status: videoStatus.status,
+              would_use_real_provider: videoStatus.would_use_real_provider,
             },
           };
         }

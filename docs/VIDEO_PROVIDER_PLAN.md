@@ -2,12 +2,11 @@
 
 ## Purpose
 
-This plan designs the safest path for adding the first real video provider
-later. It does not implement a real video provider and does not enable real
-video calls. The future integration must follow the same guard pattern already
-used for real image generation: feature flag, server-side SSM secret, credit
-guardrails, generated asset storage, provider activity logging, and disabled by
-default.
+This plan documents the safest path for the first real video provider. The
+Luma Ray / Dream Machine provider class now exists, but real video remains
+disabled by default and cannot run unless every guard passes: feature flag,
+effective provider, server-side SSM secret, credit guardrails, duration caps,
+generated asset storage, and provider activity logging.
 
 ## Current Video Workflow
 
@@ -21,9 +20,9 @@ The current Video Segments tab is mock-first:
 - `start_second` is recomputed from segment order and duration.
 - Project/scene cost widgets include video segment cost.
 - Provider activity records safe metadata only.
-- Disabled-by-default video provider guard foundation exists. Provider status
-  recognizes Luma, Runway, OpenAI/Sora, and fal.ai video providers, but no real
-  video provider class or network call exists yet.
+- Disabled-by-default Luma provider implementation exists. Provider status
+  recognizes Luma as the only connected real video provider; Runway,
+  OpenAI/Sora, and fal.ai remain catalog/status entries only.
 - Mock segment creation and expansion enforce configured segment/project
   duration caps before credits are deducted.
 
@@ -206,7 +205,7 @@ implemented before broad private beta video generation.
 
 ## Backend API Design
 
-Future implementation modules:
+Implementation modules:
 
 - `backend/providers/video_luma.py`
 - Optional shared `backend/providers/video_base.py` if more providers follow.
@@ -234,7 +233,7 @@ Endpoint behavior:
     introduced.
   - Store completed video asset.
   - Create segment and deduct credits after successful storage.
-- `POST /api/scenes/{scene_id}/segments/expand`
+- `POST /api/scenes/{scene_id}/expand`
   - Use previous segment provider job id or stored video asset as continuation
     source.
   - Enforce max segment and project duration limits.
@@ -282,24 +281,20 @@ Real mode should avoid surprise behavior:
 
 Backend tests:
 
-- real video blocked when `USE_REAL_VIDEO_PROVIDER=false`
-- real video blocked when key is missing
-- video status endpoint/readiness includes Luma provider fields
-- real video blocked when selected provider is not allowlisted
-- insufficient credits block before provider call
-- missing scene image blocks image-to-video real call
-- max segments per scene blocks expand
-- max project seconds blocks generation
-- successful mocked provider response saves `video_segment` asset metadata
-- successful real generation updates segment `video_url`
-- failed provider does not deduct credits
-- timeout does not deduct credits
-- user cancellation releases reservation if reservations are implemented
-- Expand Next 5 Seconds uses parent segment/provider job context
-- segment `duration` and `start_second` are correct after initial, expand, and
-  reorder
-- provider activity logs success/failure/blocked without secrets or raw video
-- no real network calls in unit tests
+- implemented: real video blocked when `USE_REAL_VIDEO_PROVIDER=false`
+- implemented: real video blocked when key is missing
+- implemented: video status endpoint/readiness includes Luma provider fields
+- implemented: real video blocked when selected provider is not Luma
+- implemented: insufficient credits block before provider call
+- implemented: max segments per scene blocks before provider call
+- implemented: max project seconds blocks generation
+- implemented: successful mocked provider response saves `video_segment` asset metadata
+- implemented: successful real generation updates segment `video_url`
+- implemented: failed provider does not deduct credits
+- implemented: provider activity logs success/failure/blocked without secrets or raw video
+- implemented: no real network calls in unit tests
+- future: timeout/cancellation reservation behavior if async reservations are added
+- future: broader continuation validation for provider-specific extension semantics
 
 Frontend checks:
 
@@ -347,10 +342,10 @@ Before increasing scope:
 - Confirm max segment and max project duration limits work.
 - Confirm rollback to mock mode works.
 
-## Non-Goals
+## Current Non-Goals
 
-- No real video provider class in this pass.
-- No real video API calls.
+- No default real video execution.
+- No real video API calls in tests.
 - No voice, music, or export provider work.
 - No frontend API key inputs.
 - No Stripe changes.

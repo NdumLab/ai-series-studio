@@ -1,7 +1,7 @@
 # AI Episode Studio — PRD
 
 ## Problem Statement
-Build a full-stack web MVP called AI Episode Studio that helps creators generate complete 1–3 minute AI story videos from characters, scenes, voice, music and short video clips. The product remains mock-first for video/voice/music/export. Real LLM execution exists for story and prompt text operations only, and real OpenAI image generation exists behind disabled-by-default guards, server-side secrets, credit checks, and asset storage.
+Build a full-stack web MVP called AI Episode Studio that helps creators generate complete 1–3 minute AI story videos from characters, scenes, voice, music and short video clips. The product remains mock-first by default for video/voice/music/export. Real LLM execution exists for story and prompt text operations, real OpenAI image generation exists behind disabled-by-default guards, and Luma video generation exists behind disabled-by-default guards, server-side secrets, credit checks, duration caps, provider activity logging, and asset storage.
 
 ## Architecture
 - Backend: FastAPI + MongoDB (relational-style schemas), all routes under `/api`
@@ -12,9 +12,9 @@ Build a full-stack web MVP called AI Episode Studio that helps creators generate
   local demos/tests.
 - Provider architecture exists under `backend/providers/`; LLM is real-capable
   behind `USE_REAL_LLM_PROVIDER`, OpenAI image is real-capable behind
-  `USE_REAL_IMAGE_PROVIDER`, and video now has a disabled-by-default guard
-  foundation for future Luma integration. Video/voice/music/export remain
-  mock-only at runtime.
+  `USE_REAL_IMAGE_PROVIDER`, and Luma video is real-capable behind
+  `USE_REAL_VIDEO_PROVIDER`. Video remains mock by default, and
+  voice/music/export remain mock-only at runtime.
 - Mock generators return curated static URLs (Unsplash + Google sample mp4s) and log every generation/provider activity.
 
 ## Data Models (MongoDB collections)
@@ -36,7 +36,9 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 - Character CRUD with placeholder portrait, per-character voice override, `order` field, and drag handles in the Cast view.
 - Mock image generation (curated URL pool, 5% mock failure to populate admin failed jobs)
 - Mock video segment generation, "Expand next 5s", approve/reject/regenerate,
-  with configurable segment duration and scene/project duration caps.
+  with configurable segment duration and scene/project duration caps. Luma real
+  video segment generation is implemented behind disabled-by-default guards and
+  stores completed MP4s as generated assets.
 - Cost estimator (POST /api/cost-estimate + GET /api/projects/{id}/cost-estimate)
 - Final Export page with stitched preview (mock final video URL)
 - Admin console: stats + users/projects/generations/failed jobs/provider activity/provider health/recently deleted tables
@@ -44,8 +46,10 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
   available for text operations. Real OpenAI image support exists but is
   disabled by default and guarded by feature flag, server-side secret, credits,
   storage, provider activity logging, readiness status, and a default
-  single-image activation guard. Video has provider readiness/status and
-  duration guardrails only; video/voice/music/export remain mock-only.
+  single-image activation guard. Luma video support exists but is disabled by
+  default and guarded by feature flag, effective provider, server-side SSM
+  secret, credits, duration caps, storage, and provider activity logging.
+  Voice/music/export remain mock-only.
 - Real image provider planning and guard details are documented in
   `docs/IMAGE_PROVIDER_PLAN.md`.
 - Backend-only provider secrets resolver exists with disabled mode and AWS SSM
@@ -74,15 +78,15 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
   `docs/AUTH_PLAN.md`.
 - Current MVP status: mock-first workflow is mature; real LLM is gated and
   available for text operations; real OpenAI image is implemented but disabled
-  by default; video guardrails are implemented but no real video provider is
-  connected; voice/music/export remain mock-only.
+  by default; Luma video is implemented but disabled by default; voice/music/
+  export remain mock-only.
 - 100% MVP still requires real image staging/private-beta enablement, real
   video segments, real voice/music or upload fallback, real FFmpeg export,
   production object storage configuration, deployment, and end-to-end real
   media validation.
 - Recommended build order:
   1. Real image staging/private-beta enablement.
-  2. Real video provider implementation behind existing guards.
+  2. Luma video private-beta validation behind existing guards.
   3. Real voice/music.
   4. Real export.
   5. Production storage configuration.
@@ -95,7 +99,7 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 ## Backlog (P2)
 - Production Stripe hardening / live billing decision.
 - Real Image provider rollout / private-beta enablement.
-- Real Video provider.
+- Real Video private-beta rollout.
 - Real Voice provider.
 - Real Music provider.
 - Real Export / FFmpeg worker.
@@ -915,7 +919,8 @@ drag behavior for characters.
 ### Current delete/provider status
 - Soft delete / restore / Recently Deleted / purge are implemented.
 - Real LLM is gated behind `USE_REAL_LLM_PROVIDER`.
-- Image / Video / Voice / Music / Export providers remain mock-only.
+- OpenAI image and Luma video are implemented behind disabled-by-default
+  guards. Voice / Music / Export providers remain mock-only.
 
 ### Backlog after Iteration 32
 - P1 completed: Character drag handles in Cast view; Safe delete / Undo delete;

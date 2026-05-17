@@ -10,10 +10,10 @@ The app is intentionally mock-first. Provider selection and provider activity
 plumbing exist, and real LLM execution is gated behind server-side flags and
 keys. The first real image provider implementation exists for OpenAI GPT Image,
 but it is disabled by default and cannot run without the image feature flag,
-server-side secrets, credit checks, and asset storage. Video now has a
-disabled-by-default guard foundation for future Luma integration, but no real
-video API calls are implemented. Voice, music, and export providers remain
-mock-only.
+server-side secrets, credit checks, and asset storage. Luma video support now
+exists behind disabled-by-default guards for 5-second segments, server-side
+SSM secrets, credit checks, duration caps, provider activity logging, and
+asset storage. Voice, music, and export providers remain mock-only.
 
 ## MVP Plan
 
@@ -62,10 +62,12 @@ Real video provider planning is documented in
   and generated image storage succeeds. Controlled activation defaults to
   `REAL_IMAGE_SINGLE_TEST_MODE=true`, which allows one real scene image and one
   real character image per user before private-beta expansion.
-- Video has a disabled-by-default provider guard foundation for future Luma
-  integration. Provider status recognizes Luma, Runway, OpenAI/Sora, and
-  fal.ai video options; mock video generation enforces configured segment and
-  project duration caps. No real video provider class or network call exists.
+- Luma video support exists through `backend/providers/video_luma.py`, but
+  real video generation remains disabled until `USE_REAL_VIDEO_PROVIDER=true`,
+  effective video provider is `luma`, a backend SSM secret exists at
+  `SSM_PROVIDER_KEY_PREFIX/video/luma/api-key`, user credits pass, duration
+  caps pass, and generated MP4 storage succeeds. When any guard fails, the
+  existing mock video flow continues and provider activity remains safe.
 - Voice, music, and export providers remain mock-only.
 - A backend-only secrets resolver foundation exists. It defaults to disabled
   mode and can later resolve provider API keys from AWS SSM Parameter Store
@@ -393,10 +395,10 @@ REACT_APP_BACKEND_URL=http://localhost:8000 python -m pytest backend/tests/backe
   state, secrets backend, selected provider/model, key presence, real
   capability, asset storage backend, available credits, provider activity
   logging, and single-image test usage.
-- Video provider status and guardrails exist, but video remains mock-only.
-  `USE_REAL_VIDEO_PROVIDER=true` is blocked unless a future provider
-  implementation, server-side SSM secret, credit checks, and duration limits
-  all pass.
+- Luma video can run only when `USE_REAL_VIDEO_PROVIDER=true`, the effective
+  video provider is `luma`, a server-side SSM secret exists, credits are
+  available, duration guardrails pass, and asset storage succeeds. The default
+  remains mock mode; no frontend API key input exists.
 - Voice, music, and export remain mock-only even if their
   `USE_REAL_*_PROVIDER` flags are set.
 - Do not put real API keys in `.env.example`, README examples, or committed
@@ -426,11 +428,12 @@ Completed:
 - Real image staging/private-beta enablement runbook.
 - Real video provider integration plan.
 - Video provider guard foundation.
+- Real Luma video provider behind disabled-by-default guards.
 
 Still remaining before paid MVP:
 
 - Real Image provider rollout / private-beta enablement.
-- Real Video provider implementation.
+- Real Video private-beta rollout.
 - Real Voice provider.
 - Real Music provider.
 - Real Export / FFmpeg worker.
@@ -438,10 +441,9 @@ Still remaining before paid MVP:
 - Multi-tenant teams.
 - Versioned scene revisions.
 
-Next recommended implementation: real Luma provider implementation behind the
-existing video guards, with mocked unit tests and no default real calls. Keep
-the OpenAI image provider disabled until staging has a server-side SSM secret,
-capped credits, and reviewed provider activity.
+Next recommended implementation: private-beta validation for Luma video with
+server-side SSM secret, capped credits, reviewed provider activity, and
+rollback via `USE_REAL_VIDEO_PROVIDER=false`.
 
 ## Useful Paths
 

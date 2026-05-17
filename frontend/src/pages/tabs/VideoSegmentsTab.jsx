@@ -31,7 +31,9 @@ export function VideoSegmentsTab({ scenes, providers, options, setData, reload }
       ),
     0
   );
-  const videoRealFlag = !!providers?.feature_flags?.video;
+  const videoStatus = providers?.status?.video;
+  const videoRealFlag = !!videoStatus?.would_use_real_provider;
+  const videoBlocked = videoStatus?.status === "blocked";
   return (
     <div className="space-y-4" data-testid="segments-tab">
       <ProviderHintChip
@@ -42,8 +44,13 @@ export function VideoSegmentsTab({ scenes, providers, options, setData, reload }
       />
       <div className="es-card p-3 flex flex-wrap items-center gap-2 border-white/10 bg-white/[0.02]">
         <span className="px-2 py-0.5 rounded-md border border-white/15 text-[10px] font-mono uppercase tracking-widest text-[#A1A1AA]">
-          {videoRealFlag ? "Real flag on" : "Mock video active"}
+          {videoRealFlag ? "Real video ready" : videoBlocked ? "Real video blocked" : "Mock video active"}
         </span>
+        {videoStatus?.mode && (
+          <span className="px-2 py-0.5 rounded-md border border-white/15 text-[10px] font-mono uppercase tracking-widest text-[#A1A1AA]">
+            {videoStatus.mode}
+          </span>
+        )}
         <span className="text-xs text-[#A1A1AA]">
           Segment {segmentSeconds}s · max {maxSegments}/scene · project{" "}
           {currentProjectSeconds}/{maxProjectSeconds}s

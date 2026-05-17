@@ -75,13 +75,11 @@ def _real_capable(modality: Modality, provider_name: Optional[str]) -> bool:
             return False
         return (provider_name or "").strip().lower() in OPENAI_IMAGE_PROVIDER_IDS
     if modality == "video":
-        return (provider_name or "").strip().lower() in {
-            "luma",
-            "runway",
-            "openai-video",
-            "sora",
-            "fal-video",
-        }
+        try:
+            from .video_luma import LUMA_VIDEO_PROVIDER_IDS
+        except Exception:  # pragma: no cover
+            return False
+        return (provider_name or "").strip().lower() in LUMA_VIDEO_PROVIDER_IDS
     return False
 
 
@@ -203,6 +201,37 @@ async def execute_provider(
                 estimated_credits=estimated_credits,
                 error=exc.__class__.__name__,
                 message="Real image provider failed before request.",
+                meta=meta,
+            )
+            await _record(failed, 0, project_id, scene_id, segment_id)
+            return failed
+
+    if modality == "video" and flag_on and has_key and _real_capable("video", resolved["provider"]):
+        try:
+            from .video_luma import LumaVideoProvider
+            real_video = LumaVideoProvider(
+                provider_name=resolved["provider"],
+                model_name=resolved["model"],
+            )
+            real_res = await real_video.run(**call_kwargs)
+            real_res.estimated_credits = estimated_credits
+            real_res.meta = {**meta, **real_res.meta}
+            await _record(
+                real_res,
+                int(real_res.meta.get("duration_ms") or 0),
+                project_id, scene_id, segment_id,
+            )
+            return real_res
+        except Exception as exc:  # pragma: no cover - provider returns failures itself
+            failed = ProviderResult(
+                modality="video",
+                provider_name=resolved["provider"],
+                model_name=resolved["model"],
+                mode="real",
+                status=STATUS_FAILED,
+                estimated_credits=estimated_credits,
+                error=exc.__class__.__name__,
+                message="Real video provider failed before request.",
                 meta=meta,
             )
             await _record(failed, 0, project_id, scene_id, segment_id)

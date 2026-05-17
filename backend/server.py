@@ -2146,6 +2146,47 @@ async def _store_generated_image_asset(
     return stored["url"]
 
 
+async def _store_generated_video_asset(
+    *,
+    user: dict,
+    project_id: str,
+    scene_id: str,
+    segment_id: str,
+    provider_result,
+) -> str:
+    video_bytes = (provider_result.output or {}).get("video_bytes")
+    if not isinstance(video_bytes, (bytes, bytearray)) or not video_bytes:
+        raise HTTPException(502, "Real video provider returned no video data")
+    mime_type = (provider_result.output or {}).get("mime_type") or "video/mp4"
+    asset_id = new_id()
+    storage_key = make_storage_key(
+        user_id=user["id"],
+        project_id=project_id,
+        asset_type="video_segment",
+        asset_id=asset_id,
+        mime_type=mime_type,
+    )
+    stored = storage_backend(ASSET_STORAGE_CONFIG).save_bytes(storage_key, bytes(video_bytes))
+    asset_doc = asset_metadata(
+        asset_id=asset_id,
+        user_id=user["id"],
+        project_id=project_id,
+        scene_id=scene_id,
+        segment_id=segment_id,
+        asset_type="video_segment",
+        storage_backend_name=ASSET_STORAGE_CONFIG.backend,
+        storage_key=stored["storage_key"],
+        url=stored["url"],
+        mime_type=mime_type,
+        size_bytes=stored.get("size_bytes", 0),
+        provider_name=provider_result.provider_name,
+        provider_job_id=provider_result.provider_job_id,
+        created_at=now_iso(),
+    )
+    await db.assets.insert_one(asset_doc.copy())
+    return stored["url"]
+
+
 @api.post("/characters/{character_id}/generate-image")
 async def generate_character_image(character_id: str, user: dict = Depends(current_user)):
     character = await _owned_character(character_id, user)
@@ -2250,9 +2291,29 @@ async def _create_scene_segment(
     guard_config = await _assert_video_generation_allowed(scene)
     cost = COSTS["video_segment"]
     await _check_credits(user, cost, "video_segment")
+
+    siblings = await db.segments.find({"scene_id": scene_id}, {"_id": 0}).sort("order", 1).to_list(200)
+    order = len(siblings)
+    parent_segment_id: Optional[str] = None
+    parent_provider_job_id: Optional[str] = None
+    parent_video_url: Optional[str] = None
+    start_second = 0
+    if siblings:
+        last = siblings[-1]
+        start_second = int(last.get("start_second", 0)) + int(last.get("duration", 5))
+        if expand_mode == "expand":
+            parent_segment_id = last["id"]
+            parent_provider_job_id = last.get("provider_job_id")
+            parent_video_url = last.get("video_url")
+
+    duration = int(guard_config["segment_seconds"])
+    segment_id = new_id()
     # Provider execution guard for video generation.
     proj = await db.projects.find_one({"id": scene["project_id"]}, {"_id": 0})
     global_settings = await _load_provider_settings()
+    snap = provider_status(modality="video", project=proj, global_settings=global_settings)
+    if snap.get("would_use_real_provider") and ASSET_STORAGE_CONFIG.backend != "local":
+        raise HTTPException(503, "Asset storage backend is not configured for real video generation")
     guard = await execute_provider(
         modality="video",
         project=proj,
@@ -2260,25 +2321,41 @@ async def _create_scene_segment(
         estimated_credits=cost,
         project_id=scene["project_id"],
         scene_id=scene_id,
+        segment_id=segment_id,
+        prompt=scene.get("enhanced_video_prompt") or scene.get("visual_prompt") or "",
+        image_url=scene.get("image_url"),
+        duration_seconds=duration,
+        expand_mode=expand_mode,
+        parent_provider_job_id=parent_provider_job_id,
+        parent_video_url=parent_video_url,
     )
     log.info("provider.video mode=%s status=%s provider=%s/%s", guard.mode, guard.status, guard.provider_name, guard.model_name)
-    if random.random() < 0.05:
-        await log_generation("video_segment", scene["project_id"], 0, status="failed", error="mock render failed", user_id=user["id"])
-        raise HTTPException(503, "Mock video render failed")
+    if guard.mode == "real":
+        if guard.status != STATUS_SUCCESS:
+            await log_generation(
+                "video_segment",
+                scene["project_id"],
+                0,
+                status="failed",
+                error=guard.error or guard.message or "real video provider failed",
+                user_id=user["id"],
+            )
+            raise HTTPException(502, "Real video provider failed")
+        video_url = await _store_generated_video_asset(
+            user=user,
+            project_id=scene["project_id"],
+            scene_id=scene_id,
+            segment_id=segment_id,
+            provider_result=guard,
+        )
+    else:
+        if random.random() < 0.05:
+            await log_generation("video_segment", scene["project_id"], 0, status="failed", error="mock render failed", user_id=user["id"])
+            raise HTTPException(503, "Mock video render failed")
+        video_url = random.choice(MOCK_VIDEO_URLS)
 
-    siblings = await db.segments.find({"scene_id": scene_id}, {"_id": 0}).sort("order", 1).to_list(200)
-    order = len(siblings)
-    parent_segment_id: Optional[str] = None
-    start_second = 0
-    if siblings:
-        last = siblings[-1]
-        start_second = int(last.get("start_second", 0)) + int(last.get("duration", 5))
-        if expand_mode == "expand":
-            parent_segment_id = last["id"]
-
-    duration = int(guard_config["segment_seconds"])
     doc = {
-        "id": new_id(),
+        "id": segment_id,
         "scene_id": scene_id,
         "project_id": scene["project_id"],
         "order": order,
@@ -2287,7 +2364,10 @@ async def _create_scene_segment(
         "duration": duration,
         "expand_mode": expand_mode,
         "continuity_prompt": (continuity_prompt or scene.get("visual_prompt") or "").strip(),
-        "video_url": random.choice(MOCK_VIDEO_URLS),
+        "video_url": video_url,
+        "provider_name": guard.provider_name,
+        "provider_job_id": guard.provider_job_id,
+        "generation_mode": guard.mode,
         "status": "pending",
         "created_at": now_iso(),
     }

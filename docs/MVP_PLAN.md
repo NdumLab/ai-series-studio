@@ -49,11 +49,11 @@ Completed today:
   stored in MongoDB.
 - Real LLM gating: real LLM support exists for story/text operations behind
   `USE_REAL_LLM_PROVIDER`, with mock fallback.
-- Video guard foundation: video provider status recognizes Luma, Runway,
-  OpenAI/Sora, and fal.ai video providers; disabled-by-default env placeholders
-  exist; mock video generation uses `VIDEO_SEGMENT_SECONDS`; and scene/project
-  duration caps block runaway generation before future real calls are added.
-  No real video provider class or network call exists yet.
+- Real video provider: Luma Ray / Dream Machine support exists behind
+  `USE_REAL_VIDEO_PROVIDER=true`, effective provider `luma`, backend-only SSM
+  secret resolution, credit checks, scene/project duration caps, provider
+  activity logging, and generated MP4 asset storage. It is disabled by default;
+  mock video generation remains the default path when any guard fails.
 - Mock remaining non-LLM providers: Voice, Music, and Export remain mock-only.
 - Cost tracking: operation costs, project/scene estimates, wallet ring,
   high-cost scene warnings, trend deltas, reduce-to-draft, per-user credit
@@ -116,12 +116,13 @@ Completed:
 - [x] Controlled real image activation readiness and single-test guard.
 - [x] Real video provider guard design and implementation plan.
 - [x] Video provider guard foundation.
+- [x] Real Luma video provider behind disabled-by-default guards.
 
 Remaining:
 
 - [x] Production auth/user ownership hardening before paid billing.
 - [ ] Real image staging rollout and private-beta enablement.
-- [ ] Real video provider implementation.
+- [ ] Real video private-beta validation.
 - [ ] Real voice provider.
 - [ ] Real music/SFX provider.
 - [ ] Real FFmpeg export worker.
@@ -201,11 +202,10 @@ decision and are not enabled.
 
 - Completed: add [`docs/VIDEO_PROVIDER_PLAN.md`](VIDEO_PROVIDER_PLAN.md).
 - Completed: add disabled-by-default video provider guard foundation.
-- Recommended first provider: Luma Ray.
-- Next: implement one real video provider with feature flag, server-side SSM
-  secret, credit checks, asset storage, provider activity logging, mocked unit
-  tests, and disabled-by-default runtime behavior.
-- Start with 5-second segments.
+- Completed: implement Luma Ray / Dream Machine provider class behind feature
+  flag, server-side SSM secret, credit checks, asset storage, provider activity
+  logging, mocked unit tests, and disabled-by-default runtime behavior.
+- Started with 5-second segments.
 - Keep Expand Next 5 Seconds gated and cost-controlled.
 
 ### Phase 6: Real voice/music
