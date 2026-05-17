@@ -1,0 +1,24 @@
+[Unit]
+Description=AI Series Studio frontend dev server
+After=network-online.target ai-series-backend.service
+Wants=network-online.target
+Requires=ai-series-backend.service
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/home/ec2-user/ai-series-studio/frontend
+Environment=PATH=/usr/local/bin:/usr/bin:/home/ec2-user/.local/bin:/home/ec2-user/bin
+Environment=HOST=0.0.0.0
+Environment=PORT=3000
+Environment=BROWSER=none
+Environment=REACT_APP_BACKEND_URL=http://34.229.51.36:8000
+ExecStart=/bin/bash -lc 'exec /usr/bin/node /home/ec2-user/ai-series-studio/frontend/node_modules/@craco/craco/dist/bin/craco.js start'
+Restart=always
+RestartSec=5
+TimeoutStartSec=90
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target

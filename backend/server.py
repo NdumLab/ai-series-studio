@@ -1,12 +1,13 @@
 """AI Episode Studio - MVP backend with mock-first guarded provider execution."""
-from fastapi import FastAPI, APIRouter, Depends, Header, HTTPException, Request
+from fastapi import FastAPI, APIRouter, Depends, Header, HTTPException, Request, Response
 from dotenv import load_dotenv
-from fastapi.staticfiles import StaticFiles
+from starlette.responses import FileResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import asyncio
 import logging
+import mimetypes
 import random
 from pathlib import Path
 from pydantic import BaseModel, Field
@@ -81,7 +82,67 @@ from storage_service import (  # noqa: E402
 ASSET_STORAGE_CONFIG = storage_config(root_dir=ROOT_DIR)
 if ASSET_STORAGE_CONFIG.backend == "local":
     ASSET_STORAGE_CONFIG.local_dir.mkdir(parents=True, exist_ok=True)
-    app.mount("/assets", StaticFiles(directory=str(ASSET_STORAGE_CONFIG.local_dir)), name="assets")
+
+
+def _local_asset_path(asset_path: str) -> Path:
+    root = ASSET_STORAGE_CONFIG.local_dir.resolve()
+    target = (root / asset_path).resolve()
+    if root != target and root not in target.parents:
+        raise HTTPException(404, "Asset not found")
+    if not target.is_file():
+        raise HTTPException(404, "Asset not found")
+    return target
+
+
+@app.get("/assets/{asset_path:path}")
+@app.head("/assets/{asset_path:path}")
+async def serve_asset(asset_path: str, request: Request):
+    if ASSET_STORAGE_CONFIG.backend != "local":
+        raise HTTPException(404, "Asset not found")
+    target = _local_asset_path(asset_path)
+    file_size = target.stat().st_size
+    content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    base_headers = {
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "public, max-age=3600",
+    }
+    range_header = request.headers.get("range")
+    if not range_header:
+        return FileResponse(target, media_type=content_type, headers=base_headers)
+
+    if not range_header.startswith("bytes="):
+        return Response(status_code=416, headers={**base_headers, "Content-Range": f"bytes */{file_size}"})
+
+    start_raw, _, end_raw = range_header.removeprefix("bytes=").partition("-")
+    try:
+        if start_raw:
+            start = int(start_raw)
+            end = int(end_raw) if end_raw else file_size - 1
+        else:
+            suffix_len = int(end_raw)
+            start = max(0, file_size - suffix_len)
+            end = file_size - 1
+    except ValueError:
+        return Response(status_code=416, headers={**base_headers, "Content-Range": f"bytes */{file_size}"})
+
+    if start < 0 or end < start or start >= file_size:
+        return Response(status_code=416, headers={**base_headers, "Content-Range": f"bytes */{file_size}"})
+
+    end = min(end, file_size - 1)
+    length = end - start + 1
+    with target.open("rb") as fh:
+        fh.seek(start)
+        body = b"" if request.method == "HEAD" else fh.read(length)
+    return Response(
+        content=body,
+        status_code=206,
+        media_type=content_type,
+        headers={
+            **base_headers,
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Content-Length": str(length),
+        },
+    )
 
 
 # Activity recorder — writes safe metadata to the `provider_activity` collection.
@@ -529,11 +590,13 @@ def _credit_status_from_user(user: dict) -> dict:
 
 
 def _browser_safe_asset_url(url: Optional[str]) -> Optional[str]:
-    """Rewrite legacy localhost asset URLs to the configured public asset host."""
+    """Rewrite local asset URLs to the configured public asset host."""
     if not url:
         return url
     raw = str(url)
     parsed = urlparse(raw)
+    if not parsed.scheme and raw.startswith("/assets/"):
+        return f"{ASSET_STORAGE_CONFIG.public_base_url}{raw[len('/assets'):]}"
     if parsed.scheme in {"http", "https"} and parsed.hostname in {"localhost", "127.0.0.1"}:
         if parsed.path.startswith("/assets/"):
             return f"{ASSET_STORAGE_CONFIG.public_base_url}{parsed.path[len('/assets'):]}"

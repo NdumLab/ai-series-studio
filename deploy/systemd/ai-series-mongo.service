@@ -1,0 +1,17 @@
+[Unit]
+Description=AI Series Studio MongoDB container
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+ExecStart=/bin/bash -lc 'if [ "$(/usr/bin/podman inspect -f "{{.State.Running}}" ai-series-mongo 2>/dev/null)" = "true" ]; then exec /usr/bin/podman wait ai-series-mongo; elif /usr/bin/podman container exists ai-series-mongo; then exec /usr/bin/podman start -a ai-series-mongo; else exec /usr/bin/podman run --name ai-series-mongo -p 27017:27017 mongo:7; fi'
+ExecStop=/usr/bin/podman stop -t 20 ai-series-mongo
+Restart=always
+RestartSec=5
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
