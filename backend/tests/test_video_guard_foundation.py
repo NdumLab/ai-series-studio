@@ -469,7 +469,7 @@ def test_luma_http_client_uses_documented_video_endpoint_and_payload(monkeypatch
 
     def fake_urlopen(request, timeout):
         requests.append((request, timeout))
-        assert request.full_url == "https://api.lumalabs.ai/dream-machine/v1/generations/video"
+        assert request.full_url == "https://api.lumalabs.ai/dream-machine/v1/generations"
         assert request.headers["Authorization"] == "Bearer test-key"
         assert "\n" not in request.headers["Authorization"]
         assert '"' not in request.headers["Authorization"]
@@ -498,6 +498,7 @@ def test_luma_http_client_uses_documented_video_endpoint_and_payload(monkeypatch
 
 def test_luma_http_client_image_to_video_payload(monkeypatch):
     def fake_urlopen(request, timeout):
+        assert request.full_url == "https://api.lumalabs.ai/dream-machine/v1/generations"
         payload = request.data.decode("utf-8")
         assert '"keyframes": {"frame0": {"type": "image", "url": "https://assets.example/scene.png"}}' in payload
         return _FakeHTTPResponse(b'{"id":"job-1"}')

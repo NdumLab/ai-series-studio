@@ -228,7 +228,6 @@ class _LumaHttpClient:
     def __init__(self, api_key: str) -> None:
         self.api_key = _normalize_api_key(api_key)
         self.base_url = "https://api.lumalabs.ai/dream-machine/v1/generations"
-        self.video_url = f"{self.base_url}/video"
 
     def create_generation(
         self,
@@ -252,7 +251,7 @@ class _LumaHttpClient:
             payload["extend_generation_id"] = parent_provider_job_id
         elif parent_video_url and expand_mode == "expand":
             payload["source_video_url"] = parent_video_url
-        return self._json_request("POST", self.video_url, payload, endpoint=LUMA_CREATE_VIDEO_ENDPOINT)
+        return self._json_request("POST", self.base_url, payload, endpoint=LUMA_CREATE_VIDEO_ENDPOINT)
 
     def get_generation(self, provider_job_id: str) -> dict:
         return self._json_request("GET", f"{self.base_url}/{provider_job_id}", None, endpoint="get_generation")
