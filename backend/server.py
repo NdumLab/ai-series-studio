@@ -269,6 +269,9 @@ def studio_config() -> dict:
 
 
 VIDEO_LIMIT_MESSAGE = "Video segment limit reached for this MVP."
+REAL_IMAGE_SINGLE_TEST_MESSAGE = (
+    "Real image single-test limit reached for this MVP activation run."
+)
 
 
 def video_guard_config() -> dict:
@@ -277,6 +280,10 @@ def video_guard_config() -> dict:
         "max_segments_per_scene": max(1, _int_env("VIDEO_MAX_SEGMENTS_PER_SCENE", 3)),
         "max_project_seconds": max(1, _int_env("VIDEO_MAX_PROJECT_SECONDS", 60)),
     }
+
+
+def real_image_single_test_mode_enabled() -> bool:
+    return os.environ.get("REAL_IMAGE_SINGLE_TEST_MODE", "true").strip().lower() != "false"
 
 
 def _wallet_state(pct: float) -> str:
@@ -860,11 +867,29 @@ async def providers_status_endpoint(
     if project_id:
         project = await _owned_project(project_id, user)
     global_settings = await _load_provider_settings()
-    return provider_status(
+    status = provider_status(
         modality=modality,  # type: ignore[arg-type]
         project=project,
         global_settings=global_settings,
     )
+    if modality == "image":
+        credit_status = _credit_status_from_user(user)
+        status.update({
+            "asset_storage_backend": ASSET_STORAGE_CONFIG.backend,
+            "asset_public_base_url": ASSET_STORAGE_CONFIG.public_base_url,
+            "available_credits": credit_status["credits_available"],
+            "provider_activity_logging": "enabled",
+            "single_image_test_mode": real_image_single_test_mode_enabled(),
+            "single_image_test_limits": {
+                "scene_image": 1,
+                "character_image": 1,
+            },
+            "single_image_test_usage": {
+                "scene_image": await _real_image_test_count(user, "scene_image"),
+                "character_image": await _real_image_test_count(user, "character_image"),
+            },
+        })
+    return status
 
 
 @api.get("/config")
@@ -1933,6 +1958,28 @@ async def delete_scene(scene_id: str, user: dict = Depends(current_user)):
     return {"ok": True}
 
 
+async def _real_image_test_count(user: dict, asset_type: str) -> int:
+    return await db.assets.count_documents({
+        "user_id": user["id"],
+        "asset_type": asset_type,
+        "provider_name": {"$in": ["openai-image", "openai", "gpt-image"]},
+    })
+
+
+async def _assert_real_image_single_test_allowed(
+    *,
+    user: dict,
+    asset_type: str,
+    status_snapshot: dict,
+) -> None:
+    if not status_snapshot.get("would_use_real_provider"):
+        return
+    if not real_image_single_test_mode_enabled():
+        return
+    if await _real_image_test_count(user, asset_type) >= 1:
+        raise HTTPException(429, REAL_IMAGE_SINGLE_TEST_MESSAGE)
+
+
 @api.post("/scenes/{scene_id}/generate-image")
 async def generate_image(scene_id: str, user: dict = Depends(current_user)):
     scene = await _owned_scene(scene_id, user)
@@ -1944,6 +1991,11 @@ async def generate_image(scene_id: str, user: dict = Depends(current_user)):
     snap = provider_status(modality="image", project=proj, global_settings=global_settings)
     if snap.get("would_use_real_provider") and ASSET_STORAGE_CONFIG.backend != "local":
         raise HTTPException(503, "Asset storage backend is not configured for real image generation")
+    await _assert_real_image_single_test_allowed(
+        user=user,
+        asset_type="scene_image",
+        status_snapshot=snap,
+    )
     guard = await execute_provider(
         modality="image",
         project=proj,
@@ -2079,6 +2131,11 @@ async def generate_character_image(character_id: str, user: dict = Depends(curre
     snap = provider_status(modality="image", project=project, global_settings=global_settings)
     if snap.get("would_use_real_provider") and ASSET_STORAGE_CONFIG.backend != "local":
         raise HTTPException(503, "Asset storage backend is not configured for real image generation")
+    await _assert_real_image_single_test_allowed(
+        user=user,
+        asset_type="character_image",
+        status_snapshot=snap,
+    )
     prompt = (
         f"Create a cinematic character portrait for {character.get('name') or 'this character'}. "
         f"Character description: {character.get('description') or 'No description provided.'} "

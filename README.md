@@ -59,7 +59,9 @@ Real video provider planning is documented in
   `backend/providers/image_openai.py`, but real image generation remains
   blocked until `USE_REAL_IMAGE_PROVIDER=true`, a server-side OpenAI image
   secret is available through the secrets resolver, credit/cost checks pass,
-  and generated image storage succeeds.
+  and generated image storage succeeds. Controlled activation defaults to
+  `REAL_IMAGE_SINGLE_TEST_MODE=true`, which allows one real scene image and one
+  real character image per user before private-beta expansion.
 - Video has a disabled-by-default provider guard foundation for future Luma
   integration. Provider status recognizes Luma, Runway, OpenAI/Sora, and
   fal.ai video options; mock video generation enforces configured segment and
@@ -147,6 +149,8 @@ ASSET_S3_BUCKET=
 ASSET_S3_REGION=us-east-1
 ASSET_S3_PREFIX=ai-series-studio
 ASSET_SIGNED_URL_EXPIRE_SECONDS=3600
+USE_REAL_IMAGE_PROVIDER=false
+REAL_IMAGE_SINGLE_TEST_MODE=true
 USE_REAL_VIDEO_PROVIDER=false
 VIDEO_REAL_PROVIDER=luma
 VIDEO_REAL_MODEL=ray
@@ -385,6 +389,10 @@ REACT_APP_BACKEND_URL=http://localhost:8000 python -m pytest backend/tests/backe
   server-side LLM key/runtime. If the flag is off, missing, or the real call
   fails, the app falls back to mock behavior.
 - Image can run OpenAI GPT Image only when every server-side guard passes.
+  `/api/providers/image/status` includes readiness details for feature flag
+  state, secrets backend, selected provider/model, key presence, real
+  capability, asset storage backend, available credits, provider activity
+  logging, and single-image test usage.
 - Video provider status and guardrails exist, but video remains mock-only.
   `USE_REAL_VIDEO_PROVIDER=true` is blocked unless a future provider
   implementation, server-side SSM secret, credit checks, and duration limits

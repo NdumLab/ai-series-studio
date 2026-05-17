@@ -17,6 +17,14 @@ test cohort.
 - Successful real images are saved through the asset storage layer and recorded
   in the `assets` collection.
 - Failed real image calls do not deduct credits.
+- Image provider status exposes a readiness checklist: feature flag state,
+  secrets backend, selected provider/model, key presence, real capability,
+  asset storage backend, available credits, provider activity logging state,
+  and single-image test usage.
+- `REAL_IMAGE_SINGLE_TEST_MODE=true` is the default controlled activation
+  guard. While real image mode is ready, each user can generate at most one
+  real scene image and one real character image until the guard is explicitly
+  disabled.
 - Video, voice, music, and export providers remain mock-only.
 - No frontend API key inputs exist.
 
@@ -29,6 +37,7 @@ SECRETS_BACKEND=ssm
 AWS_REGION=us-east-1
 SSM_PROVIDER_KEY_PREFIX=/ai-series-studio/providers
 USE_REAL_IMAGE_PROVIDER=true
+REAL_IMAGE_SINGLE_TEST_MODE=true
 ```
 
 Required SSM SecureString path:
@@ -59,8 +68,9 @@ storage, or committed files.
 2. Ensure the backend instance role can read that SSM path with decryption.
 3. Set `SECRETS_BACKEND=ssm`.
 4. Set `USE_REAL_IMAGE_PROVIDER=true`.
-5. Restart the backend.
-6. In Settings or project provider overrides, select `openai-image` and a GPT
+5. Keep `REAL_IMAGE_SINGLE_TEST_MODE=true` for the first activation pass.
+6. Restart the backend.
+7. In Settings or project provider overrides, select `openai-image` and a GPT
    Image model such as `gpt-image-1`.
 
 ## Disable Real Image Mode Quickly
@@ -81,11 +91,21 @@ curl -H "Authorization: Bearer <token>" \
 
 Expected staging signal when configured:
 
+- `selected_provider=openai-image`
+- `selected_model=gpt-image-1`
 - `feature_flag_enabled=true`
+- `secrets_backend=ssm`
 - `key_present=true`
 - `real_capable=true`
 - `would_use_real_provider=true`
 - `status=ready`
+- `asset_storage_backend=local` for local staging, or the configured
+  production object-storage backend when implemented
+- `available_credits` is at least the image generation cost
+- `provider_activity_logging=enabled`
+- `single_image_test_mode=true`
+- `single_image_test_usage.scene_image=0` before the scene test
+- `single_image_test_usage.character_image=0` before the character test
 
 The response must not include the secret value.
 
@@ -98,10 +118,38 @@ The response must not include the secret value.
       implemented for the environment.
 - [ ] `/api/providers/image/status` shows `key_present=true`.
 - [ ] Image provider status shows `real_capable=true`.
+- [ ] Image provider status shows `asset_storage_backend`.
+- [ ] Image provider status shows enough `available_credits`.
+- [ ] Image provider status shows `provider_activity_logging=enabled`.
+- [ ] `REAL_IMAGE_SINGLE_TEST_MODE=true` for first activation.
+- [ ] `single_image_test_usage.scene_image=0`.
+- [ ] `single_image_test_usage.character_image=0`.
 - [ ] Video, voice, music, and export statuses remain mock-only.
 - [ ] No frontend API key inputs are visible.
 - [ ] Provider activity and credit event admin pages are accessible to an admin
       tester.
+
+## Single Image Test Mode
+
+The first staging pass must not run bulk generation. With
+`REAL_IMAGE_SINGLE_TEST_MODE=true`, the backend allows only:
+
+- One real `character_image` per user.
+- One real `scene_image` per user.
+
+If a second real image of the same type is attempted, the backend returns:
+
+```text
+Real image single-test limit reached for this MVP activation run.
+```
+
+Mock image generation is not affected. After the first activation checklist is
+complete and costs/failures are reviewed, disable the cap only for a deliberate
+private-beta expansion:
+
+```bash
+REAL_IMAGE_SINGLE_TEST_MODE=false
+```
 
 ## Test One Scene Image
 
@@ -124,6 +172,10 @@ Expected:
 - `image_url` points to the configured asset storage URL.
 - The scene has `status=image_ready`.
 - Exactly one image generation cost is deducted.
+- `/api/providers/image/status` then reports
+  `single_image_test_usage.scene_image=1`.
+- A second scene image generation attempt for the same user is blocked while
+  `REAL_IMAGE_SINGLE_TEST_MODE=true`.
 
 ## Test One Character Image
 
@@ -143,6 +195,10 @@ Expected:
   `remaining_credits`.
 - Character `reference_image_url` is updated to the stored asset URL.
 - Exactly one image generation cost is deducted.
+- `/api/providers/image/status` then reports
+  `single_image_test_usage.character_image=1`.
+- A second character image generation attempt for the same user is blocked
+  while `REAL_IMAGE_SINGLE_TEST_MODE=true`.
 
 ## Confirm Asset Storage Works
 
@@ -230,3 +286,35 @@ Expected failure/blocked row:
 
 Rollback does not affect real LLM behavior, Stripe test mode, or existing
 stored image assets.
+
+## Exact First Activation Sequence
+
+1. Store the OpenAI image key in SSM SecureString:
+   `/ai-series-studio/providers/image/openai/api-key`.
+2. Set backend env:
+
+```bash
+SECRETS_BACKEND=ssm
+AWS_REGION=us-east-1
+SSM_PROVIDER_KEY_PREFIX=/ai-series-studio/providers
+USE_REAL_IMAGE_PROVIDER=true
+REAL_IMAGE_SINGLE_TEST_MODE=true
+```
+
+3. Restart the backend.
+4. Select `openai-image` / `gpt-image-1` in Settings or project provider
+   overrides.
+5. Call `GET /api/providers/image/status` and verify ready status, key
+   presence, asset storage backend, available credits, activity logging, and
+   single-image usage `0/0`.
+6. Generate one character image.
+7. Generate one scene image.
+8. Verify two `assets` records exist: one `character_image`, one
+   `scene_image`, both with `provider_name=openai-image`.
+9. Verify the character `reference_image_url` and scene `image_url` point to
+   stored asset URLs.
+10. Verify credits were deducted exactly once for each successful image.
+11. Verify `provider_activity` contains `mode=real`, `status=success`, and no
+    prompt text, raw image data, or secrets.
+12. Roll back by setting `USE_REAL_IMAGE_PROVIDER=false` and restarting the
+    backend.

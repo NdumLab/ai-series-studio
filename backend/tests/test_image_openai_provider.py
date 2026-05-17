@@ -182,12 +182,30 @@ def test_provider_status_does_not_expose_secret_when_real_ready(monkeypatch):
 
 
 class _InsertCollection:
-    def __init__(self):
-        self.rows = []
+    def __init__(self, rows=None):
+        self.rows = [dict(row) for row in (rows or [])]
+
+    def _matches(self, row, query):
+        for key, expected in query.items():
+            if isinstance(expected, dict) and "$in" in expected:
+                if row.get(key) not in expected["$in"]:
+                    return False
+                continue
+            if row.get(key) != expected:
+                return False
+        return True
 
     async def insert_one(self, doc):
         self.rows.append(dict(doc))
         return SimpleNamespace(inserted_id=doc.get("id"))
+
+    async def count_documents(self, query):
+        return len([row for row in self.rows if self._matches(row, query)])
+
+
+class _FindOneCollection(_InsertCollection):
+    async def find_one(self, query, projection=None):
+        return next((row for row in self.rows if self._matches(row, query)), None)
 
 
 def test_successful_real_image_asset_metadata_is_saved(monkeypatch, tmp_path):
@@ -221,3 +239,87 @@ def test_successful_real_image_asset_metadata_is_saved(monkeypatch, tmp_path):
     assert fake_assets.rows[0]["asset_type"] == "scene_image"
     assert fake_assets.rows[0]["size_bytes"] == len(b"image-bytes")
     assert (tmp_path / fake_assets.rows[0]["storage_key"]).exists()
+
+
+def test_image_readiness_status_includes_activation_checklist(monkeypatch):
+    monkeypatch.setenv("REAL_IMAGE_SINGLE_TEST_MODE", "true")
+    fake_assets = _InsertCollection([
+        {
+            "user_id": "user-1",
+            "asset_type": "scene_image",
+            "provider_name": "openai-image",
+        }
+    ])
+    fake_provider_settings = _FindOneCollection([
+        {
+            "id": server.SETTINGS_DOC_ID,
+            "mock_mode": True,
+            **server.DEFAULT_PROVIDER_SETTINGS,
+            "image": {"provider": "openai-image", "model": "gpt-image-1"},
+        }
+    ])
+    monkeypatch.setattr(
+        server,
+        "db",
+        SimpleNamespace(assets=fake_assets, provider_settings=fake_provider_settings),
+    )
+
+    status = _run(server.providers_status_endpoint("image", user={
+        "id": "user-1",
+        "credits": 250,
+        "credits_reserved": 0,
+        "credits_used": 0,
+    }))
+
+    assert status["selected_provider"] == "openai-image"
+    assert status["selected_model"] == "gpt-image-1"
+    assert status["feature_flag_enabled"] is False
+    assert status["key_present"] is False
+    assert status["real_capable"] is True
+    assert status["asset_storage_backend"] == server.ASSET_STORAGE_CONFIG.backend
+    assert status["available_credits"] == 250
+    assert status["provider_activity_logging"] == "enabled"
+    assert status["single_image_test_mode"] is True
+    assert status["single_image_test_limits"] == {"scene_image": 1, "character_image": 1}
+    assert status["single_image_test_usage"]["scene_image"] == 1
+    assert "unit-secret" not in str(status)
+
+
+def test_real_image_single_test_guard_blocks_second_scene_image(monkeypatch):
+    monkeypatch.setenv("REAL_IMAGE_SINGLE_TEST_MODE", "true")
+    fake_assets = _InsertCollection([
+        {
+            "user_id": "user-1",
+            "asset_type": "scene_image",
+            "provider_name": "openai-image",
+        }
+    ])
+    monkeypatch.setattr(server, "db", SimpleNamespace(assets=fake_assets))
+
+    with pytest.raises(server.HTTPException) as exc:
+        _run(server._assert_real_image_single_test_allowed(
+            user={"id": "user-1"},
+            asset_type="scene_image",
+            status_snapshot={"would_use_real_provider": True},
+        ))
+
+    assert exc.value.status_code == 429
+    assert exc.value.detail == server.REAL_IMAGE_SINGLE_TEST_MESSAGE
+
+
+def test_real_image_single_test_guard_ignored_for_mock_mode(monkeypatch):
+    monkeypatch.setenv("REAL_IMAGE_SINGLE_TEST_MODE", "true")
+    fake_assets = _InsertCollection([
+        {
+            "user_id": "user-1",
+            "asset_type": "scene_image",
+            "provider_name": "openai-image",
+        }
+    ])
+    monkeypatch.setattr(server, "db", SimpleNamespace(assets=fake_assets))
+
+    _run(server._assert_real_image_single_test_allowed(
+        user={"id": "user-1"},
+        asset_type="scene_image",
+        status_snapshot={"would_use_real_provider": False},
+    ))

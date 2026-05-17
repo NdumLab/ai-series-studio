@@ -28,10 +28,17 @@ Current provider flow:
   key-present state. Prompts, raw outputs, and keys are not logged.
 - `generate_image` and `generate_character_image` check user credits before
   work and deduct credits only after successful generation.
+- `/api/providers/image/status` exposes activation-readiness details including
+  selected provider/model, feature flag state, secrets backend, key presence,
+  real capability, asset storage backend, available credits, provider activity
+  logging state, and single-image test usage.
 
 Current safety state:
 
 - `USE_REAL_IMAGE_PROVIDER=true` alone cannot call a real image provider.
+- `REAL_IMAGE_SINGLE_TEST_MODE=true` is the default controlled activation cap:
+  one real scene image and one real character image per user before a deliberate
+  private-beta expansion.
 - A missing key makes provider status show blocked/mock.
 - The frontend has no provider API key inputs.
 - Provider settings store provider/model choices only.
@@ -102,6 +109,7 @@ SECRETS_BACKEND=disabled
 AWS_REGION=us-east-1
 SSM_PROVIDER_KEY_PREFIX=/ai-series-studio/providers
 USE_REAL_IMAGE_PROVIDER=false
+REAL_IMAGE_SINGLE_TEST_MODE=true
 IMAGE_REAL_PROVIDER=openai
 IMAGE_REAL_MODEL=gpt-image-1
 IMAGE_PROVIDER_SECRET_REF=
@@ -323,8 +331,12 @@ Frontend tests/checks:
    Completed.
 5. Enable in a local/staging test environment with SSM test secret and capped
    credits.
-6. Run capped private beta with low per-user credits.
-7. Review provider activity, failure rate, and cost per generated image.
+6. Run the controlled first activation: one character image and one scene image
+   with `REAL_IMAGE_SINGLE_TEST_MODE=true`.
+7. Review asset records, provider activity, failure rate, credits deducted, and
+   cost per generated image.
+8. Run capped private beta with low per-user credits only after explicitly
+   disabling single-image test mode.
 
 Operational staging details live in
 [`docs/REAL_IMAGE_STAGING_RUNBOOK.md`](REAL_IMAGE_STAGING_RUNBOOK.md).

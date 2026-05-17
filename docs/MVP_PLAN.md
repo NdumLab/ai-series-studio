@@ -36,7 +36,8 @@ Completed today:
 - Real image provider: OpenAI GPT Image support exists for scene and character
   images behind `USE_REAL_IMAGE_PROVIDER=true`, server-side secret resolver,
   user credit checks, generated asset storage, and provider activity logging.
-  It is disabled by default.
+  It is disabled by default. Controlled activation support now includes image
+  readiness status fields and a default single-image test guard.
 - Secrets foundation: backend-only secrets resolver exists with disabled mode
   and AWS SSM SecureString lookup support. Non-LLM providers remain blocked
   unless a server-side secret is configured and a future real provider is
@@ -112,6 +113,7 @@ Completed:
 - [x] Generated asset storage foundation.
 - [x] Real OpenAI image provider behind guards.
 - [x] Real image staging/private-beta enablement runbook.
+- [x] Controlled real image activation readiness and single-test guard.
 - [x] Real video provider guard design and implementation plan.
 - [x] Video provider guard foundation.
 
@@ -186,6 +188,9 @@ decision and are not enabled.
 - Completed: add
   [`docs/REAL_IMAGE_STAGING_RUNBOOK.md`](REAL_IMAGE_STAGING_RUNBOOK.md) for
   controlled staging/private-beta enablement.
+- Completed: add provider readiness details and
+  `REAL_IMAGE_SINGLE_TEST_MODE=true` default guard for one scene image and one
+  character image per user.
 - Real image execution is gated behind `USE_REAL_IMAGE_PROVIDER=true`,
   server-side secret resolver, user credit checks, asset storage, provider
   activity logging, and clear failure handling.

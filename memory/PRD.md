@@ -43,8 +43,9 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 - Provider settings + per-project provider overrides; real LLM is gated and
   available for text operations. Real OpenAI image support exists but is
   disabled by default and guarded by feature flag, server-side secret, credits,
-  storage, and provider activity logging. Video has provider readiness/status
-  and duration guardrails only; video/voice/music/export remain mock-only.
+  storage, provider activity logging, readiness status, and a default
+  single-image activation guard. Video has provider readiness/status and
+  duration guardrails only; video/voice/music/export remain mock-only.
 - Real image provider planning and guard details are documented in
   `docs/IMAGE_PROVIDER_PLAN.md`.
 - Backend-only provider secrets resolver exists with disabled mode and AWS SSM
@@ -177,6 +178,21 @@ provider activity logging.
   inside limits.
 - No real video provider class, real video API call, frontend API key input,
   Stripe change, real LLM change, or real image behavior change was added.
+
+## Iteration 37 (2026-05) — Controlled real image activation support
+- Reviewed and updated `docs/REAL_IMAGE_STAGING_RUNBOOK.md` with the exact
+  first real image activation sequence.
+- Added image provider readiness details to `/api/providers/image/status`:
+  asset storage backend, asset public base URL, available credits, provider
+  activity logging state, single-image test mode, limits, and current usage.
+- Added `REAL_IMAGE_SINGLE_TEST_MODE=true` as the default controlled
+  activation guard. When real image mode is ready, each user can create at most
+  one real `scene_image` and one real `character_image` until the guard is
+  explicitly disabled.
+- Added tests for image readiness status and single-image guard behavior.
+- No real image API calls, real video provider work, frontend API key inputs,
+  Stripe changes, real LLM changes, or real video/voice/music/export provider
+  connections were added.
 
 ## Auth Plan
 - `docs/AUTH_PLAN.md` compares Emergent Google login, custom JWT auth, and
