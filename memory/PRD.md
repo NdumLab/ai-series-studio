@@ -35,9 +35,13 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 - Cost estimator (POST /api/cost-estimate + GET /api/projects/{id}/cost-estimate)
 - Final Export page with stitched preview (mock final video URL)
 - Admin console: stats + users/projects/generations/failed jobs/provider activity/provider health/recently deleted tables
-- Provider settings + per-project provider overrides; real LLM is gated and available for text operations, non-LLM modalities remain mock-only.
-- Real image provider planning and secrets gate are documented in
-  `docs/IMAGE_PROVIDER_PLAN.md`; no real image provider is connected yet.
+- Provider settings + per-project provider overrides; real LLM is gated and
+  available for text operations. Real OpenAI image support exists but is
+  disabled by default and guarded by feature flag, server-side secret, credits,
+  storage, and provider activity logging. Video/voice/music/export remain
+  mock-only.
+- Real image provider planning and guard details are documented in
+  `docs/IMAGE_PROVIDER_PLAN.md`.
 - Backend-only provider secrets resolver exists with disabled mode and AWS SSM
   SecureString lookup support; non-LLM providers remain blocked by default.
 - Generated asset storage abstraction exists with local storage default, local
@@ -63,15 +67,15 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 - Auth planning and production ownership hardening plan:
   `docs/AUTH_PLAN.md`.
 - Current MVP status: mock-first workflow is mature; real LLM is gated and
-  available for text operations; image/video/voice/music/export remain
-  mock-only.
-- 100% MVP still requires real image generation, real video segments, real
-  voice/music or upload fallback, real FFmpeg export, production object
-  storage configuration, deployment, and end-to-end real media validation.
+  available for text operations; real OpenAI image is implemented but disabled
+  by default; video/voice/music/export remain mock-only.
+- 100% MVP still requires real image staging/private-beta enablement, real
+  video segments, real voice/music or upload fallback, real FFmpeg export,
+  production object storage configuration, deployment, and end-to-end real
+  media validation.
 - Recommended build order:
-  1. Real image provider behind feature flag, server-side secret resolver,
-     credit guardrails, asset storage, and provider activity logging.
-  2. Real video provider.
+  1. Real image staging/private-beta enablement.
+  2. Real video provider planning and guard design.
   3. Real voice/music.
   4. Real export.
   5. Production storage configuration.
@@ -83,7 +87,7 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 
 ## Backlog (P2)
 - Production Stripe hardening / live billing decision.
-- Real Image provider.
+- Real Image provider rollout / private-beta enablement.
 - Real Video provider.
 - Real Voice provider.
 - Real Music provider.
@@ -97,6 +101,23 @@ Auth, user ownership, wallet guardrails, and Stripe test-mode fulfillment are
 now in place. Real media providers should still remain blocked until each
 provider has server-side secrets, credit controls, durable asset storage, and
 provider activity logging.
+
+## Iteration 33 (2026-05) — Real OpenAI image provider behind guards
+- Added `backend/providers/image_openai.py` for OpenAI GPT Image generation.
+- Real scene image generation uses `enhanced_image_prompt` or `visual_prompt`;
+  real character image generation uses character name/description/style.
+- Real image calls are disabled by default and only run when
+  `USE_REAL_IMAGE_PROVIDER=true`, the effective image provider is `openai` or
+  `openai-image`, the server-side SSM secret exists, and user credits pass.
+- Successful real image bytes are saved through asset storage, `assets`
+  metadata is recorded, and scene/character image URLs are updated to stored
+  asset URLs.
+- Failed real image calls return failure without credit deduction or mock
+  fallback surprise costs.
+- Provider activity logs safe metadata only; no prompts, raw image data, or
+  secret values are recorded.
+- No frontend API key inputs, video/voice/music/export providers, Stripe
+  changes, real LLM changes, or real credentials were added.
 
 ## Auth Plan
 - `docs/AUTH_PLAN.md` compares Emergent Google login, custom JWT auth, and

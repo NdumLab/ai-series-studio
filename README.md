@@ -8,7 +8,10 @@ preview.
 
 The app is intentionally mock-first. Provider selection and provider activity
 plumbing exist, and real LLM execution is gated behind server-side flags and
-keys. Image, video, voice, music, and export providers remain mock-only.
+keys. The first real image provider implementation exists for OpenAI GPT Image,
+but it is disabled by default and cannot run without the image feature flag,
+server-side secrets, credit checks, and asset storage. Video, voice, music, and
+export providers remain mock-only.
 
 ## MVP Plan
 
@@ -20,8 +23,8 @@ cost controls, testing strategy, launch criteria, and post-MVP scope.
 Real image provider preparation is documented in
 [docs/IMAGE_PROVIDER_PLAN.md](/home/ec2-user/ai-series-studio/docs/IMAGE_PROVIDER_PLAN.md).
 The current recommendation is OpenAI `gpt-image-1` as the first MVP image
-provider after the secrets/storage gates are implemented. No real image
-provider is connected yet.
+provider. The provider class is connected behind guards, but real calls remain
+disabled by default.
 
 ## Current Product State
 
@@ -44,10 +47,12 @@ provider is connected yet.
   implemented.
 - Real LLM support exists for text operations, gated behind
   `USE_REAL_LLM_PROVIDER`.
-- Image, video, voice, music, and export providers remain mock-only.
-- Real image generation remains blocked until `USE_REAL_IMAGE_PROVIDER=true`,
-  a server-side secret is available, credit/cost checks pass, and generated
-  image storage is ready.
+- OpenAI GPT Image support exists for scene and character images through
+  `backend/providers/image_openai.py`, but real image generation remains
+  blocked until `USE_REAL_IMAGE_PROVIDER=true`, a server-side OpenAI image
+  secret is available through the secrets resolver, credit/cost checks pass,
+  and generated image storage succeeds.
+- Video, voice, music, and export providers remain mock-only.
 - A backend-only secrets resolver foundation exists. It defaults to disabled
   mode and can later resolve provider API keys from AWS SSM Parameter Store
   `SecureString` without exposing secret values to MongoDB or the frontend.
@@ -386,10 +391,11 @@ Completed:
 - Stripe test checkout/webhook.
 - Server-side secrets resolver foundation.
 - Generated asset storage foundation.
+- Real OpenAI image provider behind guards.
 
 Still remaining before paid MVP:
 
-- Real Image provider.
+- Real Image provider rollout / private-beta enablement.
 - Real Video provider.
 - Real Voice provider.
 - Real Music provider.
@@ -398,9 +404,9 @@ Still remaining before paid MVP:
 - Multi-tenant teams.
 - Versioned scene revisions.
 
-Next recommended implementation: real OpenAI `gpt-image-1` provider, disabled
-by default and gated behind `USE_REAL_IMAGE_PROVIDER=true`, server-side secret
-resolver, credit guardrails, asset storage, and provider activity logging.
+Next recommended implementation: real video provider planning and guard design.
+Keep the OpenAI image provider disabled until staging has a server-side SSM
+secret, capped credits, and reviewed provider activity.
 
 ## Useful Paths
 

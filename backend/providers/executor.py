@@ -1,15 +1,10 @@
 """Provider execution guard.
 
-`execute_provider(...)` is the single entry point that resolves the configured
-provider, checks the feature flag + key, and then dispatches to either the
-real provider (LLM modality only — Phase 2B) or the corresponding mock.
-
-Phase 2B guarantee:
-  - Only the **LLM** modality can ever take the real path.
-  - All other modalities are hard-pinned to mock — even if their feature flag
-    were flipped on, `keys.key_present_for_modality()` returns False so the
-    executor refuses the real path.
-  - Real LLM failures fall back to mock so the user workflow never breaks.
+`execute_provider(...)` resolves the configured provider, checks feature flag
+and server-side key state, and dispatches to a real provider only for connected
+modalities. Today, LLM has its own `execute_llm(...)` path and image can run
+OpenAI GPT Image only when all guards pass. Video, voice, music, and export
+remain mock-only.
 """
 from __future__ import annotations
 
@@ -23,6 +18,7 @@ from .base import (
     MODALITIES,
     STATUS_SUCCESS,
     STATUS_BLOCKED,
+    STATUS_FAILED,
     STATUS_SKIPPED,
 )
 from .keys import (
@@ -69,6 +65,18 @@ def _flag_enabled(modality: Modality) -> bool:
     return os.environ.get(env_key, "false").strip().lower() == "true"
 
 
+def _real_capable(modality: Modality, provider_name: Optional[str]) -> bool:
+    if modality == "llm":
+        return True
+    if modality == "image":
+        try:
+            from .image_openai import OPENAI_IMAGE_PROVIDER_IDS
+        except Exception:  # pragma: no cover
+            return False
+        return (provider_name or "").strip().lower() in OPENAI_IMAGE_PROVIDER_IDS
+    return False
+
+
 def _resolve(
     *,
     modality: Modality,
@@ -102,14 +110,9 @@ def provider_status(
         global_settings=global_settings,
     )
     flag_on = _flag_enabled(modality)
-    # Modality-aware: only LLM is allowed real, everything else is permanently
-    # pinned to mock-only in Phase 2B.
     has_key = key_present_for_modality(modality, resolved["provider"])
-    will_run_real = flag_on and has_key
-    # Secrets can now be resolved for future non-LLM providers, but no real
-    # non-LLM provider class is connected yet. Keep runtime capability false
-    # until a provider implementation exists.
-    real_capable = modality == "llm"
+    real_capable = _real_capable(modality, resolved["provider"])
+    will_run_real = flag_on and has_key and real_capable
     return {
         "modality": modality,
         "provider": resolved["provider"],
@@ -144,10 +147,8 @@ async def execute_provider(
 ) -> ProviderResult:
     """Resolve + run a provider call.
 
-    Phase 2B: only the **LLM** modality is allowed to take the real path, and
-    even then only when the flag is on AND `key_present_for_modality()` is
-    True. All other modalities always run the mock — this function is NOT
-    used to issue real image/video/voice/music/export calls.
+    Image can take a real OpenAI path when the flag, provider, and key guards
+    pass. Video/voice/music/export remain mock-only.
     """
     if modality not in MODALITIES:
         raise ValueError(f"Unknown modality: {modality}")
@@ -168,21 +169,56 @@ async def execute_provider(
         "secrets_backend": provider_secrets_backend() if modality != "llm" else "llm-runtime",
     }
 
+    if modality == "image" and flag_on and has_key and _real_capable("image", resolved["provider"]):
+        try:
+            from .image_openai import OpenAIImageProvider
+            real = OpenAIImageProvider(
+                provider_name=resolved["provider"],
+                model_name=resolved["model"],
+            )
+            real_res = await real.run(**call_kwargs)
+            real_res.estimated_credits = estimated_credits
+            real_res.meta = {**meta, **real_res.meta}
+            await _record(
+                real_res,
+                int(real_res.meta.get("duration_ms") or 0),
+                project_id, scene_id, segment_id,
+            )
+            return real_res
+        except Exception as exc:  # pragma: no cover - provider returns failures itself
+            failed = ProviderResult(
+                modality="image",
+                provider_name=resolved["provider"],
+                model_name=resolved["model"],
+                mode="real",
+                status=STATUS_FAILED,
+                estimated_credits=estimated_credits,
+                error=exc.__class__.__name__,
+                message="Real image provider failed before request.",
+                meta=meta,
+            )
+            await _record(failed, 0, project_id, scene_id, segment_id)
+            return failed
+
     mock_cls = MOCK_PROVIDER_BY_MODALITY[modality]
-    mock = mock_cls(
-        provider_name=resolved["provider"], model_name=resolved["model"]
-    )
+    mock = mock_cls(provider_name=resolved["provider"], model_name=resolved["model"])
     started = time.perf_counter()
     res = await mock.run(**call_kwargs)
     duration_ms = int((time.perf_counter() - started) * 1000)
     res.estimated_credits = estimated_credits or res.estimated_credits
     res.mode = "mock"
-    if flag_on and not has_key:
+    if flag_on and (not has_key or not _real_capable(modality, resolved["provider"])):
         res.status = STATUS_BLOCKED
-        res.message = (
-            "Real provider blocked — feature flag is on but no API key is "
-            "configured server-side. Mock provider ran instead."
-        )
+        if not has_key:
+            res.message = (
+                "Real provider blocked — feature flag is on but no API key is "
+                "configured server-side. Mock provider ran instead."
+            )
+        else:
+            res.message = (
+                "Real provider blocked — selected provider is not connected "
+                "for real execution. Mock provider ran instead."
+            )
     else:
         res.status = STATUS_SUCCESS
         res.message = "Mock mode active — real provider call skipped."

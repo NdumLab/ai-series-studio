@@ -1,4 +1,4 @@
-"""AI Episode Studio - MVP backend (mock generation, no external APIs)."""
+"""AI Episode Studio - MVP backend with mock-first guarded provider execution."""
 from fastapi import FastAPI, APIRouter, Depends, Header, HTTPException, Request
 from dotenv import load_dotenv
 from fastapi.staticfiles import StaticFiles
@@ -32,6 +32,7 @@ log = logging.getLogger("episode-studio")
 # Phase 2A provider service layer (mock-only foundation).
 from providers import (  # noqa: E402  (kept after logger init)
     MODALITIES as PROVIDER_LAYER_MODALITIES,
+    STATUS_SUCCESS,
     execute_provider,
     execute_llm,
     provider_status,
@@ -186,7 +187,7 @@ PROVIDER_CATALOG = {
     "image": [
         {"id": "fal", "label": "fal.ai", "models": ["flux-pro", "flux-dev", "ideogram-v2"]},
         {"id": "gemini-nano-banana", "label": "Gemini Nano Banana", "models": ["nano-banana"]},
-        {"id": "openai-image", "label": "OpenAI gpt-image-1", "models": ["gpt-image-1"]},
+        {"id": "openai-image", "label": "OpenAI GPT Image", "models": ["gpt-image-1", "gpt-image-1-mini", "gpt-image-1.5"]},
         {"id": "custom", "label": "Custom image provider", "models": []},
     ],
     "video": [
@@ -1921,6 +1922,9 @@ async def generate_image(scene_id: str, user: dict = Depends(current_user)):
     # Provider execution guard — verifies flag + key before any real call.
     proj = await db.projects.find_one({"id": scene["project_id"]}, {"_id": 0})
     global_settings = await _load_provider_settings()
+    snap = provider_status(modality="image", project=proj, global_settings=global_settings)
+    if snap.get("would_use_real_provider") and ASSET_STORAGE_CONFIG.backend != "local":
+        raise HTTPException(503, "Asset storage backend is not configured for real image generation")
     guard = await execute_provider(
         modality="image",
         project=proj,
@@ -1928,8 +1932,38 @@ async def generate_image(scene_id: str, user: dict = Depends(current_user)):
         estimated_credits=cost,
         project_id=scene["project_id"],
         scene_id=scene_id,
+        prompt=scene.get("enhanced_image_prompt") or scene.get("visual_prompt") or "",
+        image_kind="scene",
     )
     log.info("provider.image mode=%s status=%s provider=%s/%s", guard.mode, guard.status, guard.provider_name, guard.model_name)
+    if guard.mode == "real":
+        if guard.status != STATUS_SUCCESS:
+            await log_generation(
+                "image",
+                scene["project_id"],
+                0,
+                status="failed",
+                error=guard.error or guard.message or "real image provider failed",
+                user_id=user["id"],
+            )
+            raise HTTPException(502, "Real image provider failed")
+        url = await _store_generated_image_asset(
+            user=user,
+            project_id=scene["project_id"],
+            asset_type="scene_image",
+            provider_result=guard,
+            scene_id=scene_id,
+        )
+        await db.scenes.update_one({"id": scene_id}, {"$set": {"image_url": url, "status": "image_ready"}})
+        remaining_credits = await _deduct_credits(
+            user,
+            cost,
+            "image",
+            project_id=scene["project_id"],
+        )
+        await log_generation("image", scene["project_id"], cost, user_id=user["id"])
+        return {"image_url": url, "cost": cost, "remaining_credits": remaining_credits}
+
     # 5% mock failure to power admin failed jobs widget
     if random.random() < 0.05:
         await log_generation("image", scene["project_id"], 0, status="failed", error="mock provider timeout", user_id=user["id"])
@@ -1971,6 +2005,132 @@ async def generate_image(scene_id: str, user: dict = Depends(current_user)):
     )
     await log_generation("image", scene["project_id"], cost, user_id=user["id"])
     return {"image_url": url, "cost": cost, "remaining_credits": remaining_credits}
+
+
+async def _store_generated_image_asset(
+    *,
+    user: dict,
+    project_id: str,
+    asset_type: str,
+    provider_result,
+    scene_id: Optional[str] = None,
+    character_id: Optional[str] = None,
+) -> str:
+    image_bytes = (provider_result.output or {}).get("image_bytes")
+    if not isinstance(image_bytes, (bytes, bytearray)) or not image_bytes:
+        raise HTTPException(502, "Real image provider returned no image data")
+    mime_type = (provider_result.output or {}).get("mime_type") or "image/png"
+    asset_id = new_id()
+    storage_key = make_storage_key(
+        user_id=user["id"],
+        project_id=project_id,
+        asset_type=asset_type,
+        asset_id=asset_id,
+        mime_type=mime_type,
+    )
+    stored = storage_backend(ASSET_STORAGE_CONFIG).save_bytes(storage_key, bytes(image_bytes))
+    asset_doc = asset_metadata(
+        asset_id=asset_id,
+        user_id=user["id"],
+        project_id=project_id,
+        scene_id=scene_id,
+        asset_type=asset_type,
+        storage_backend_name=ASSET_STORAGE_CONFIG.backend,
+        storage_key=stored["storage_key"],
+        url=stored["url"],
+        mime_type=mime_type,
+        size_bytes=stored.get("size_bytes", 0),
+        provider_name=provider_result.provider_name,
+        provider_job_id=provider_result.provider_job_id,
+        created_at=now_iso(),
+    )
+    if character_id:
+        asset_doc["character_id"] = character_id
+    await db.assets.insert_one(asset_doc.copy())
+    return stored["url"]
+
+
+@api.post("/characters/{character_id}/generate-image")
+async def generate_character_image(character_id: str, user: dict = Depends(current_user)):
+    character = await _owned_character(character_id, user)
+    project = await _owned_project(character["project_id"], user)
+    cost = COSTS["image"]
+    await _check_credits(user, cost, "image")
+    global_settings = await _load_provider_settings()
+    snap = provider_status(modality="image", project=project, global_settings=global_settings)
+    if snap.get("would_use_real_provider") and ASSET_STORAGE_CONFIG.backend != "local":
+        raise HTTPException(503, "Asset storage backend is not configured for real image generation")
+    prompt = (
+        f"Create a cinematic character portrait for {character.get('name') or 'this character'}. "
+        f"Character description: {character.get('description') or 'No description provided.'} "
+        f"Voice/style note: {character.get('voice_style') or 'cinematic'}."
+    )
+    guard = await execute_provider(
+        modality="image",
+        project=project,
+        global_settings=global_settings,
+        estimated_credits=cost,
+        project_id=character["project_id"],
+        prompt=prompt,
+        image_kind="character",
+    )
+    log.info("provider.character_image mode=%s status=%s provider=%s/%s", guard.mode, guard.status, guard.provider_name, guard.model_name)
+    if guard.mode == "real":
+        if guard.status != STATUS_SUCCESS:
+            await log_generation(
+                "image",
+                character["project_id"],
+                0,
+                status="failed",
+                error=guard.error or guard.message or "real image provider failed",
+                user_id=user["id"],
+            )
+            raise HTTPException(502, "Real image provider failed")
+        url = await _store_generated_image_asset(
+            user=user,
+            project_id=character["project_id"],
+            asset_type="character_image",
+            provider_result=guard,
+            character_id=character_id,
+        )
+    else:
+        url = MOCK_CHARACTER_IMAGE
+        asset_id = new_id()
+        storage_key = make_storage_key(
+            user_id=user["id"],
+            project_id=character["project_id"],
+            asset_type="character_image",
+            asset_id=asset_id,
+            mime_type="image/png",
+            source_name=url,
+        )
+        stored = storage_backend(ASSET_STORAGE_CONFIG).save_external_url(storage_key, url)
+        asset_doc = asset_metadata(
+            asset_id=asset_id,
+            user_id=user["id"],
+            project_id=character["project_id"],
+            asset_type="character_image",
+            storage_backend_name=ASSET_STORAGE_CONFIG.backend,
+            storage_key=stored["storage_key"],
+            url=stored["url"],
+            external_url=stored.get("external_url"),
+            mime_type="image/png",
+            size_bytes=stored.get("size_bytes", 0),
+            provider_name=guard.provider_name,
+            provider_job_id=guard.provider_job_id,
+            created_at=now_iso(),
+        )
+        asset_doc["character_id"] = character_id
+        await db.assets.insert_one(asset_doc.copy())
+    await db.characters.update_one({"id": character_id}, {"$set": {"reference_image_url": url}})
+    remaining_credits = await _deduct_credits(
+        user,
+        cost,
+        "image",
+        project_id=character["project_id"],
+    )
+    await log_generation("image", character["project_id"], cost, user_id=user["id"])
+    return {"image_url": url, "reference_image_url": url, "cost": cost, "remaining_credits": remaining_credits}
 
 
 async def _create_scene_segment(

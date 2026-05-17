@@ -74,18 +74,48 @@ def get_provider_secret(
         return SecretResolution(False, backend, ref, "not_configured", "Unsupported secrets backend")
     if not ref:
         return SecretResolution(False, backend, ref, "not_configured", "Missing provider secret reference")
+    value, error = _get_ssm_secret_value(ref, source)
+    if error:
+        return SecretResolution(False, backend, ref, "not_configured", error)
+    return SecretResolution(bool(value), backend, ref, "configured" if value else "not_configured")
+
+
+def _get_ssm_secret_value(ref: str, source: dict) -> tuple[str, Optional[str]]:
     try:
         import boto3  # type: ignore
         from botocore.exceptions import BotoCoreError, ClientError  # type: ignore
     except Exception:
-        return SecretResolution(False, backend, ref, "not_configured", "AWS SDK unavailable")
+        return "", "AWS SDK unavailable"
     try:
         client = boto3.client("ssm", region_name=(source.get("AWS_REGION") or "us-east-1").strip())
         response = client.get_parameter(Name=ref, WithDecryption=True)
         value = ((response or {}).get("Parameter") or {}).get("Value") or ""
-        return SecretResolution(bool(str(value).strip()), backend, ref, "configured" if str(value).strip() else "not_configured")
+        return str(value).strip(), None
     except (BotoCoreError, ClientError, Exception) as exc:  # noqa: BLE001
-        return SecretResolution(False, backend, ref, "not_configured", exc.__class__.__name__)
+        return "", exc.__class__.__name__
+
+
+def get_provider_secret_value(
+    modality: Optional[str],
+    provider_name: Optional[str],
+    env: Optional[dict] = None,
+) -> Optional[str]:
+    """Resolve an actual provider secret for backend-only provider execution.
+
+    This must never be used by frontend-facing status endpoints or persisted in
+    MongoDB. It fails closed and returns None on disabled/missing/unsupported
+    secret backends.
+    """
+    source = env if env is not None else os.environ
+    if secrets_backend(source) != "ssm":
+        return None
+    ref = provider_secret_ref(modality, provider_name, source)
+    if not ref:
+        return None
+    value, error = _get_ssm_secret_value(ref, source)
+    if error:
+        return None
+    return value or None
 
 
 def key_present_for_provider(

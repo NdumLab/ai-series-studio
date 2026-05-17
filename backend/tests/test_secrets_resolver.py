@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from secrets_resolver import (  # noqa: E402
     get_provider_secret,
+    get_provider_secret_value,
     key_present_for_provider,
     provider_secret_ref,
     secrets_backend,
@@ -21,6 +22,7 @@ def test_disabled_backend_returns_not_configured():
     assert res.backend == "disabled"
     assert res.status == "not_configured"
     assert res.secret_ref == "/ai-series-studio/providers/image/openai/api-key"
+    assert get_provider_secret_value("image", "openai-image", env) is None
 
 
 def test_missing_provider_key_returns_false():
@@ -79,6 +81,7 @@ def test_ssm_backend_uses_boto3_without_exposing_secret(monkeypatch):
     assert res.status == "configured"
     assert res.secret_ref == "/ai-series-studio/providers/image/openai/api-key"
     assert "configured-test-value" not in repr(res)
+    assert get_provider_secret_value("image", "openai-image", env) == "configured-test-value"
 
 
 def test_secrets_backend_default_is_disabled():

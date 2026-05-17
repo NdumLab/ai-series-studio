@@ -33,10 +33,10 @@ Completed today:
 - Provider architecture: provider catalog, global settings, per-project
   overrides, effective provider resolution, guard/status endpoints, provider
   activity logging, and provider health pulse.
-- Real image planning: first-provider recommendation, secrets gate, cost
-  controls, API design, storage gate, rollout plan, and tests are documented
-  in [`docs/IMAGE_PROVIDER_PLAN.md`](IMAGE_PROVIDER_PLAN.md). No real image
-  provider code is connected yet.
+- Real image provider: OpenAI GPT Image support exists for scene and character
+  images behind `USE_REAL_IMAGE_PROVIDER=true`, server-side secret resolver,
+  user credit checks, generated asset storage, and provider activity logging.
+  It is disabled by default.
 - Secrets foundation: backend-only secrets resolver exists with disabled mode
   and AWS SSM SecureString lookup support. Non-LLM providers remain blocked
   unless a server-side secret is configured and a future real provider is
@@ -48,7 +48,7 @@ Completed today:
   stored in MongoDB.
 - Real LLM gating: real LLM support exists for story/text operations behind
   `USE_REAL_LLM_PROVIDER`, with mock fallback.
-- Mock non-LLM providers: Image, Video, Voice, Music, and Export remain
+- Mock remaining non-LLM providers: Video, Voice, Music, and Export remain
   mock-only.
 - Cost tracking: operation costs, project/scene estimates, wallet ring,
   high-cost scene warnings, trend deltas, reduce-to-draft, per-user credit
@@ -106,11 +106,12 @@ Completed:
 - [x] Real image provider integration plan and secrets gate.
 - [x] Server-side secrets resolver foundation.
 - [x] Generated asset storage foundation.
+- [x] Real OpenAI image provider behind guards.
 
 Remaining:
 
 - [x] Production auth/user ownership hardening before paid billing.
-- [ ] Real image provider.
+- [ ] Real image staging rollout and private-beta enablement.
 - [ ] Real video provider.
 - [ ] Real voice provider.
 - [ ] Real music/SFX provider.
@@ -173,17 +174,18 @@ decision and are not enabled.
 - Completed: add server-side secrets resolver with AWS SSM Parameter Store
   SecureString support.
 - Completed: add generated asset storage abstraction and asset metadata records.
-- Next implementation: add real OpenAI `gpt-image-1` provider behind
-  mocks/tests, still disabled by default.
-- Real image execution must be gated behind `USE_REAL_IMAGE_PROVIDER=true`,
+- Completed: add real OpenAI GPT Image provider behind mocks/tests, disabled
+  by default.
+- Real image execution is gated behind `USE_REAL_IMAGE_PROVIDER=true`,
   server-side secret resolver, user credit checks, asset storage, provider
   activity logging, and clear failure handling.
-- Generate scene images first, then character images.
+- Scene image and character image generation paths are supported.
 - Keep video mocked.
 
 ### Phase 5: Real video provider
 
-- Add one real video provider.
+- Next: plan one real video provider with the same feature flag, secrets,
+  credit, storage, and provider-activity guard pattern.
 - Start with 5-second segments.
 - Keep Expand Next 5 Seconds gated and cost-controlled.
 

@@ -2,9 +2,11 @@
 
 ## Purpose
 
-This plan prepares AI Series Studio for real image generation without enabling
-real provider calls yet. Image, Video, Voice, Music, and Export must remain
-mock-only until secrets, cost controls, tests, and rollout gates are in place.
+This plan tracks the guarded OpenAI image integration. OpenAI GPT Image support
+now exists for scene and character images, but it remains disabled by default
+and cannot run unless all feature flag, secret, credit, storage, and provider
+activity gates pass. Video, Voice, Music, and Export must remain mock-only
+until their own plans and gates are in place.
 
 ## Current Architecture Review
 
@@ -13,16 +15,19 @@ Current provider flow:
 - `backend/providers/resolver.py` resolves provider/model using project
   override, global settings, then hard fallback.
 - `backend/providers/executor.py` is the central execution guard. It reads
-  feature flags, checks `key_present_for_modality`, runs the mock provider, and
-  records safe provider activity metadata.
-- `backend/providers/keys.py` only permits real-key detection for LLM today.
-  Every non-LLM modality, including image, returns `False`.
+  feature flags, checks `key_present_for_modality`, runs real OpenAI image only
+  when the image gates pass, otherwise runs the mock provider, and records safe
+  provider activity metadata.
+- `backend/providers/keys.py` preserves LLM runtime detection and routes
+  non-LLM key checks through the backend-only secrets resolver.
+- `backend/providers/image_openai.py` implements the first real image provider
+  for OpenAI GPT Image models.
 - `backend/server.py` registers provider activity logging with a strict
   allowlist: modality, provider/model, source, mode, status, estimated credits,
   job id, duration, project/scene/segment ids, feature flag state, and
   key-present state. Prompts, raw outputs, and keys are not logged.
-- `generate_image` checks user credits before work and deducts credits only
-  after successful generation.
+- `generate_image` and `generate_character_image` check user credits before
+  work and deduct credits only after successful generation.
 
 Current safety state:
 
@@ -31,6 +36,8 @@ Current safety state:
 - The frontend has no provider API key inputs.
 - Provider settings store provider/model choices only.
 - Credits are user-owned and enforced server-side.
+- Successful real image bytes are saved through asset storage and represented
+  by `assets` metadata records; raw binary data is not stored in MongoDB.
 
 ## Provider Comparison
 
@@ -42,7 +49,9 @@ Current safety state:
 
 Sources reviewed:
 
-- OpenAI model documentation: `https://developers.openai.com/api/docs/models/gpt-image-1`
+- OpenAI image generation guide: `https://platform.openai.com/docs/guides/image-generation`
+- OpenAI model documentation: `https://platform.openai.com/docs/models/gpt-image-1`
+- OpenAI image API reference: `https://platform.openai.com/docs/api-reference/images`
 - Gemini image generation docs: `https://ai.google.dev/gemini-api/docs/image-generation`
 - fal.ai pricing docs: `https://fal.ai/docs/documentation/model-apis/pricing`
 
@@ -73,10 +82,10 @@ Current implementation status:
 - Default `SECRETS_BACKEND=disabled` returns safe `not_configured`.
 - `SECRETS_BACKEND=ssm` attempts AWS SSM Parameter Store lookup and fails
   closed if AWS SDK/configuration/parameter lookup is unavailable.
-- Secret values are never returned to provider status responses or frontend
-  code.
-- Non-LLM providers still remain blocked because no real provider class is
-  connected yet.
+- Secret values are never returned to provider status responses, provider
+  activity, MongoDB provider settings, or frontend code.
+- The OpenAI image provider can read the secret backend-side only when
+  `SECRETS_BACKEND=ssm` and the expected parameter exists.
 
 Rules:
 
@@ -255,8 +264,10 @@ beta image generation.
 
 Current safety status:
 
-- No real image provider is connected yet.
-- No real image API calls are made.
+- The real OpenAI image provider is connected but disabled by default.
+- No real image API calls are made unless `USE_REAL_IMAGE_PROVIDER=true`, the
+  selected provider is `openai-image` or `openai`, the server-side secret is
+  present, user credits are sufficient, and storage succeeds.
 - No real video, voice, music, or export providers are connected.
 - No frontend API key inputs exist.
 - No AWS credentials are committed or required for local storage mode.
@@ -307,14 +318,15 @@ Frontend tests/checks:
 2. Add image key-present checks, still returning false by default.
 3. Add storage abstraction for generated images. Completed.
 4. Add real OpenAI `gpt-image-1` provider class behind unit-test mocks.
-5. Enable in a local/staging test environment with fake or test provider client.
+   Completed.
+5. Enable in a local/staging test environment with SSM test secret and capped
+   credits.
 6. Run capped private beta with low per-user credits.
 7. Review provider activity, failure rate, and cost per generated image.
 
-## Non-Goals For This Pass
+## Non-Goals Still In Force
 
-- No real image provider code.
-- No real image API calls.
 - No video, voice, music, or export provider work.
 - No frontend API key fields.
 - No secrets stored in MongoDB.
+- No real image calls unless the runtime guard is explicitly configured.
