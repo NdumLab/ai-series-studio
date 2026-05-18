@@ -3,8 +3,8 @@
 `execute_provider(...)` resolves the configured provider, checks feature flag
 and server-side key state, and dispatches to a real provider only for connected
 modalities. Today, LLM has its own `execute_llm(...)` path; image, video,
-voice, and music can run connected real providers when all guards pass. Export
-remains mock-only.
+voice, music, and local FFmpeg export can run connected real providers when all
+guards pass.
 """
 from __future__ import annotations
 
@@ -92,6 +92,14 @@ def _real_capable(modality: Modality, provider_name: Optional[str]) -> bool:
         except Exception:  # pragma: no cover
             return False
         return (provider_name or "").strip().lower() in ELEVENLABS_MUSIC_PROVIDER_IDS
+    if modality == "export":
+        if (provider_name or "").strip().lower() != "ffmpeg-local":
+            return False
+        try:
+            from export_ffmpeg import ffmpeg_available
+        except Exception:  # pragma: no cover
+            return False
+        return ffmpeg_available()
     return False
 
 

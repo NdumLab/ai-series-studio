@@ -27,6 +27,8 @@ def key_present_for_modality(modality: Optional[str], provider_name: Optional[st
     key-configured when the backend secrets resolver can prove a server-side
     secret exists.
     """
+    if modality == "export" and (provider_name or "").strip().lower() == "ffmpeg-local":
+        return True
     if modality != "llm":
         return key_present_for_provider(modality, provider_name)
     # Lazy import to avoid pulling emergentintegrations at module load.
@@ -57,11 +59,15 @@ def key_status(provider_name: Optional[str]) -> str:
 def key_status_for_modality(modality: Optional[str], provider_name: Optional[str]) -> str:
     if modality == "llm":
         return key_status(provider_name)
+    if modality == "export" and (provider_name or "").strip().lower() == "ffmpeg-local":
+        return "not_required"
     return get_provider_secret(modality, provider_name).status
 
 
 def secret_ref_for_modality(modality: Optional[str], provider_name: Optional[str]) -> Optional[str]:
     if modality == "llm":
+        return None
+    if modality == "export" and (provider_name or "").strip().lower() == "ffmpeg-local":
         return None
     return get_provider_secret(modality, provider_name).secret_ref
 

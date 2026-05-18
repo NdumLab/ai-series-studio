@@ -66,7 +66,10 @@ Completed today:
   `elevenlabs-music`, backend-only SSM secret resolution, credit checks,
   provider activity logging, and generated `music_audio` asset storage. It is
   disabled by default and has not had a controlled paid real music/SFX call.
-- Mock remaining non-LLM providers: Export remains mock-only.
+- Real export worker: Local FFmpeg export support exists behind
+  `USE_REAL_EXPORT_PROVIDER=true`, effective provider `ffmpeg-local`,
+  installed `ffmpeg`/`ffprobe`, local generated video assets, credit checks,
+  and generated `export_video` asset storage. It is disabled by default.
 - Cost tracking: operation costs, project/scene estimates, wallet ring,
   high-cost scene warnings, trend deltas, reduce-to-draft, per-user credit
   balances, `GET /api/credits/status`, credit event logging, and
@@ -133,12 +136,12 @@ Completed:
 - [x] Controlled real Luma initial segment and Expand Next 5 Seconds validation.
 - [x] Real ElevenLabs voice provider behind disabled-by-default guards.
 - [x] Real ElevenLabs music/SFX provider behind disabled-by-default guards.
+- [x] Real FFmpeg export worker behind disabled-by-default guards.
 
 Remaining:
 
 - [x] Production auth/user ownership hardening before paid billing.
 - [ ] Real image staging rollout and private-beta enablement.
-- [ ] Real FFmpeg export worker.
 - [ ] S3/R2 storage.
 - [ ] Production Stripe hardening and live billing decision.
 - [ ] Production deployment.
@@ -236,8 +239,8 @@ decision and are not enabled.
 
 ### Phase 7: Real export
 
-- Add FFmpeg worker.
-- Merge approved clips.
+- Completed: add FFmpeg worker behind disabled-by-default guards.
+- Completed: merge approved local generated video clips.
 - Add voice/music/subtitles.
 - Store final MP4 in S3/R2.
 

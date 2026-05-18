@@ -146,7 +146,6 @@ def test_real_llm_fallback_when_real_raises(clean_env, monkeypatch, captured_act
     ("video",  "USE_REAL_VIDEO_PROVIDER"),
     ("voice",  "USE_REAL_VOICE_PROVIDER"),
     ("music",  "USE_REAL_MUSIC_PROVIDER"),
-    ("export", "USE_REAL_EXPORT_PROVIDER"),
 ])
 def test_non_llm_modalities_block_without_key_even_with_flag_on(modality, flag_env, monkeypatch, captured_activity):
     monkeypatch.setenv(flag_env, "true")
@@ -162,6 +161,14 @@ def test_non_llm_modalities_block_without_key_even_with_flag_on(modality, flag_e
     assert snap["mode"] == "mock"
     assert snap["real_capable"] is (modality == "voice")
     assert snap["would_use_real_provider"] is False
+
+
+def test_ffmpeg_export_does_not_require_provider_secret(monkeypatch):
+    monkeypatch.setenv("USE_REAL_EXPORT_PROVIDER", "true")
+    snap = provider_status(modality="export", project=None, global_settings=GLOBAL)
+    assert snap["key_present"] is True
+    assert snap["key_status"] == "not_required"
+    assert snap["secret_ref"] is None
 
 
 def test_provider_status_llm_is_real_capable():

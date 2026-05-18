@@ -9,6 +9,7 @@ import asyncio
 import logging
 import mimetypes
 import random
+import tempfile
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
@@ -71,11 +72,18 @@ from auth_utils import (  # noqa: E402
 )
 from billing_utils import stripe_test_config  # noqa: E402
 from credit_utils import wallet_pct, wallet_state  # noqa: E402
+from export_ffmpeg import (  # noqa: E402
+    ExportSegment,
+    FFmpegExportError,
+    ffmpeg_available,
+    run_ffmpeg_concat,
+)
 from storage_service import (  # noqa: E402
     asset_metadata,
     make_storage_key,
     storage_backend,
     storage_config,
+    validate_storage_key,
 )
 
 
@@ -2375,6 +2383,67 @@ def _music_duration_seconds_for_scene(scene: dict) -> float:
     return max(3.0, min(30.0, scene_duration))
 
 
+def _local_asset_path_from_url(url: Optional[str]) -> Optional[Path]:
+    if ASSET_STORAGE_CONFIG.backend != "local" or not url:
+        return None
+    raw = str(url)
+    parsed = urlparse(raw)
+    asset_path = ""
+    if raw.startswith("/assets/"):
+        asset_path = raw[len("/assets/"):]
+    elif parsed.path.startswith("/assets/"):
+        asset_path = parsed.path[len("/assets/"):]
+    if not asset_path:
+        return None
+    try:
+        storage_key = validate_storage_key(asset_path)
+    except ValueError:
+        return None
+    path = (ASSET_STORAGE_CONFIG.local_dir / storage_key).resolve()
+    root = ASSET_STORAGE_CONFIG.local_dir.resolve()
+    if root != path and root not in path.parents:
+        return None
+    return path if path.exists() else None
+
+
+async def _store_export_video_asset(
+    *,
+    user: dict,
+    project_id: str,
+    source_path: Path,
+    provider_name: str,
+    provider_job_id: Optional[str],
+) -> str:
+    if not source_path.exists() or source_path.stat().st_size <= 0:
+        raise HTTPException(502, "FFmpeg export produced no video data")
+    asset_id = new_id()
+    mime_type = "video/mp4"
+    storage_key = make_storage_key(
+        user_id=user["id"],
+        project_id=project_id,
+        asset_type="export_video",
+        asset_id=asset_id,
+        mime_type=mime_type,
+    )
+    stored = storage_backend(ASSET_STORAGE_CONFIG).save_bytes(storage_key, source_path.read_bytes())
+    asset_doc = asset_metadata(
+        asset_id=asset_id,
+        user_id=user["id"],
+        project_id=project_id,
+        asset_type="export_video",
+        storage_backend_name=ASSET_STORAGE_CONFIG.backend,
+        storage_key=stored["storage_key"],
+        url=stored["url"],
+        mime_type=mime_type,
+        size_bytes=stored.get("size_bytes", 0),
+        provider_name=provider_name,
+        provider_job_id=provider_job_id,
+        created_at=now_iso(),
+    )
+    await db.assets.insert_one(asset_doc.copy())
+    return stored["url"]
+
+
 @api.post("/characters/{character_id}/generate-image")
 async def generate_character_image(character_id: str, user: dict = Depends(current_user)):
     character = await _owned_character(character_id, user)
@@ -3002,31 +3071,82 @@ async def project_cost_estimate(project_id: str, user: dict = Depends(current_us
 
 
 # ---------------------------------------------------------------------------
-# Final export (mock stitch)
+# Final export
 # ---------------------------------------------------------------------------
 @api.get("/projects/{project_id}/export")
 async def export_project(project_id: str, user: dict = Depends(current_user)):
     proj = await _owned_project(project_id, user)
+    global_settings = await _load_provider_settings()
+    export_status = provider_status(modality="export", project=proj, global_settings=global_settings)
     scenes = await db.scenes.find({"project_id": project_id}, {"_id": 0}).sort("order", 1).to_list(500)
     approved = []
+    export_segments: List[ExportSegment] = []
     total_seconds = 0
     for s in scenes:
         segs = await db.segments.find({"scene_id": s["id"], "status": "approved"}, {"_id": 0}).sort("order", 1).to_list(50)
         for seg in segs:
+            local_path = _local_asset_path_from_url(seg.get("video_url"))
             approved.append({
                 "segment_id": seg["id"],
                 "scene_id": s["id"],
                 "scene_title": s["title"],
                 "video_url": seg["video_url"],
                 "duration": seg["duration"],
+                "local_asset": bool(local_path),
             })
+            if local_path:
+                export_segments.append(ExportSegment(path=local_path, segment_id=seg["id"]))
             total_seconds += seg.get("duration", 5)
     final_url = MOCK_VIDEO_URLS[0]  # mock stitched output
     ready = len(approved) > 0
     cost = COSTS["export"] if ready else 0
     remaining_credits = None
+    generation_mode = "mock"
+    provider_name = export_status.get("selected_provider")
+    provider_job_id = None
     if ready:
         await _check_credits(user, cost, "export")
+        if export_status.get("would_use_real_provider"):
+            if ASSET_STORAGE_CONFIG.backend != "local":
+                raise HTTPException(503, "Asset storage backend is not configured for real export")
+            if len(export_segments) != len(approved):
+                await log_generation(
+                    "export",
+                    project_id,
+                    0,
+                    status="failed",
+                    error="approved segments are not all local generated assets",
+                    user_id=user["id"],
+                )
+                raise HTTPException(400, "Real export requires approved local generated video assets")
+            provider_job_id = new_id()
+            try:
+                with tempfile.TemporaryDirectory(prefix="ai-series-export-") as tmp:
+                    work_dir = Path(tmp)
+                    output_path = work_dir / "final.mp4"
+                    run_ffmpeg_concat(
+                        segments=export_segments,
+                        output_path=output_path,
+                        work_dir=work_dir,
+                    )
+                    final_url = await _store_export_video_asset(
+                        user=user,
+                        project_id=project_id,
+                        source_path=output_path,
+                        provider_name=str(provider_name or "ffmpeg-local"),
+                        provider_job_id=provider_job_id,
+                    )
+                generation_mode = "real"
+            except FFmpegExportError as exc:
+                await log_generation(
+                    "export",
+                    project_id,
+                    0,
+                    status="failed",
+                    error=str(exc),
+                    user_id=user["id"],
+                )
+                raise HTTPException(502, "FFmpeg export failed") from exc
         remaining_credits = await _deduct_credits(user, cost, "export", project_id=project_id)
         await log_generation("export", project_id, cost, user_id=user["id"])
     return {
@@ -3037,6 +3157,10 @@ async def export_project(project_id: str, user: dict = Depends(current_user)):
         "ready": ready,
         "cost": cost,
         "remaining_credits": remaining_credits,
+        "generation_mode": generation_mode,
+        "provider_name": provider_name,
+        "provider_job_id": provider_job_id,
+        "ffmpeg_available": ffmpeg_available(),
     }
 
 

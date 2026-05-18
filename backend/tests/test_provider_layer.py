@@ -182,7 +182,7 @@ def test_provider_status_snapshot(clean_env):
     snap = provider_status(modality="export", project=None, global_settings=GLOBAL)
     assert snap["mode"] == "mock"
     assert snap["would_use_real_provider"] is False
-    assert snap["key_status"] == "not_configured"
+    assert snap["key_status"] == "not_required"
     assert snap["secrets_backend"] == "disabled"
     assert snap["selected_provider"] == "ffmpeg-local"
     assert snap["selected_model"] == "ffmpeg-6"

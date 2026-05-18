@@ -24,8 +24,8 @@ generation during the first activation pass.
 - Failed real video calls do not deduct credits.
 - Video provider status exposes selected provider/model, feature flag state,
   secrets backend, key presence, real capability, and ready/blocked/mock state.
-- ElevenLabs voice and music/SFX support exist behind disabled-by-default
-  guards. Export providers remain mock-only.
+- ElevenLabs voice, music/SFX, and local FFmpeg export support exist behind
+  disabled-by-default guards.
 - No frontend API key inputs exist.
 - Controlled real video activation has been validated for one initial
   5-second segment and one Expand Next 5 Seconds segment. Real video remains
@@ -128,7 +128,8 @@ The response must not include the secret value.
       tester.
 - [ ] Real voice and music remain disabled unless separate audio activation
       runbooks are deliberately underway.
-- [ ] Export remains mock-only.
+- [ ] Real export remains disabled unless a separate export activation runbook
+      is deliberately underway.
 - [ ] No frontend API key inputs are visible.
 
 ## Dry Readiness Pass Before Enabling

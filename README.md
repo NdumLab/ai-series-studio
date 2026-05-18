@@ -18,7 +18,9 @@ guards, server-side SSM secrets, a backend-only voice id, credit checks,
 provider activity logging, and generated audio asset storage. ElevenLabs music
 and SFX support exists behind disabled-by-default guards, server-side SSM
 secrets, credit checks, provider activity logging, and generated audio asset
-storage. Export remains mock-only.
+storage. Local FFmpeg export support exists behind disabled-by-default guards,
+requires `ffmpeg` and `ffprobe` on the backend PATH, and stores generated MP4
+exports as assets.
 
 ## MVP Plan
 
@@ -95,7 +97,13 @@ Controlled Luma staging/private-beta enablement steps are documented in
   /api/scenes/{scene_id}/generate-music` stores successful audio as a
   `music_audio` asset and deducts credits only after storage succeeds. No
   controlled real music/SFX call has been run yet.
-- Export providers remain mock-only.
+- Local FFmpeg export support exists through `backend/export_ffmpeg.py`, but
+  real export remains disabled until `USE_REAL_EXPORT_PROVIDER=true`,
+  effective export provider is `ffmpeg-local`, `ffmpeg`/`ffprobe` are
+  installed, and every approved segment points to a local generated video
+  asset. Successful real exports are stored as `export_video` assets and
+  credits are deducted only after storage succeeds. Voice/music mixing and a
+  dedicated final MP4 download flow are still next.
 - A backend-only secrets resolver foundation exists. It defaults to disabled
   mode and can later resolve provider API keys from AWS SSM Parameter Store
   `SecureString` without exposing secret values to MongoDB or the frontend.
@@ -191,6 +199,9 @@ ELEVENLABS_DEFAULT_VOICE_ID=
 USE_REAL_MUSIC_PROVIDER=false
 MUSIC_REAL_PROVIDER=elevenlabs-music
 MUSIC_REAL_MODEL=music-v1
+USE_REAL_EXPORT_PROVIDER=false
+FFMPEG_BIN=ffmpeg
+FFPROBE_BIN=ffprobe
 ```
 
 `AUTH_JWT_SECRET` and `AUTH_TOKEN_EXPIRES_MINUTES` are accepted only as

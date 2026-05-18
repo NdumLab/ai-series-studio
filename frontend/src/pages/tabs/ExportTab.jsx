@@ -36,9 +36,16 @@ export function ExportTab({ projectId, providers, options }) {
           </div>
           <h3 className="font-display text-xl font-bold mb-2">Final Cut</h3>
           <p className="text-sm text-[#A1A1AA]">
-            A mocked stitched output of all approved segments. Real pipeline will use
-            FFmpeg to concat segments with music and voice.
+            {data.generation_mode === "real"
+              ? "FFmpeg stitched the approved local video segments into this export."
+              : "A mocked stitched output of all approved segments. Enable the guarded FFmpeg export worker to render a real local MP4."}
           </p>
+          {data.ready && (
+            <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-mono uppercase tracking-widest text-[#A1A1AA]">
+              <span>mode · {data.generation_mode || "mock"}</span>
+              <span>ffmpeg · {data.ffmpeg_available ? "available" : "missing"}</span>
+            </div>
+          )}
         </div>
         <div className="es-card p-4" data-testid="approved-list">
           <div className="flex items-center justify-between mb-3">
