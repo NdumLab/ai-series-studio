@@ -224,6 +224,7 @@ MOCK_VIDEO_URLS = [
     "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
 ]
 MOCK_VOICE_AUDIO_URL = "https://interactive-examples.mdn.mozilla.net/media/cc0-audio/t-rex-roar.mp3"
+MOCK_MUSIC_AUDIO_URL = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"
 
 VOICE_OPTIONS = ["Narrator-Deep", "Narrator-Warm", "Hero-Bold", "Heroine-Calm", "Villain-Raspy", "Child-Bright"]
 MUSIC_MOODS = ["Cinematic", "Tense", "Uplifting", "Mysterious", "Romantic", "Action", "Melancholic"]
@@ -271,7 +272,7 @@ PROVIDER_CATALOG = {
     "music": [
         {"id": "suno", "label": "Suno", "models": ["v4", "v3.5"]},
         {"id": "udio", "label": "Udio", "models": ["udio-130", "udio-32"]},
-        {"id": "elevenlabs-music", "label": "ElevenLabs Music", "models": ["music-v1"]},
+        {"id": "elevenlabs-music", "label": "ElevenLabs Music / SFX", "models": ["music-v1", "sound-effects"]},
         {"id": "mubert", "label": "Mubert", "models": ["pro", "standard"]},
         {"id": "custom", "label": "Custom music provider", "models": []},
     ],
@@ -368,7 +369,12 @@ DEFAULT_PROVIDER_SETTINGS = {
         "custom_model": "",
     },
     "voice": {"provider": "elevenlabs", "model": "eleven-v3", "custom_provider": "", "custom_model": ""},
-    "music": {"provider": "suno", "model": "v4", "custom_provider": "", "custom_model": ""},
+    "music": {
+        "provider": os.environ.get("MUSIC_REAL_PROVIDER", "elevenlabs-music"),
+        "model": os.environ.get("MUSIC_REAL_MODEL", "music-v1"),
+        "custom_provider": "",
+        "custom_model": "",
+    },
     "export": {"provider": "ffmpeg-local", "model": "ffmpeg-6", "custom_provider": "", "custom_model": ""},
 }
 SETTINGS_DOC_ID = "global"
@@ -613,6 +619,7 @@ def _normalize_project_asset_urls(scenes: List[dict], characters: List[dict]) ->
     for scene in scenes:
         scene["image_url"] = _browser_safe_asset_url(scene.get("image_url"))
         scene["voice_audio_url"] = _browser_safe_asset_url(scene.get("voice_audio_url"))
+        scene["music_audio_url"] = _browser_safe_asset_url(scene.get("music_audio_url"))
         for segment in scene.get("segments") or []:
             segment["video_url"] = _browser_safe_asset_url(segment.get("video_url"))
     for character in characters:
@@ -2297,6 +2304,45 @@ async def _store_generated_voice_asset(
     return stored["url"]
 
 
+async def _store_generated_music_asset(
+    *,
+    user: dict,
+    project_id: str,
+    scene_id: str,
+    provider_result,
+) -> str:
+    audio_bytes = (provider_result.output or {}).get("audio_bytes")
+    if not isinstance(audio_bytes, (bytes, bytearray)) or not audio_bytes:
+        raise HTTPException(502, "Real music provider returned no audio data")
+    mime_type = (provider_result.output or {}).get("mime_type") or "audio/mpeg"
+    asset_id = new_id()
+    storage_key = make_storage_key(
+        user_id=user["id"],
+        project_id=project_id,
+        asset_type="music_audio",
+        asset_id=asset_id,
+        mime_type=mime_type,
+    )
+    stored = storage_backend(ASSET_STORAGE_CONFIG).save_bytes(storage_key, bytes(audio_bytes))
+    asset_doc = asset_metadata(
+        asset_id=asset_id,
+        user_id=user["id"],
+        project_id=project_id,
+        scene_id=scene_id,
+        asset_type="music_audio",
+        storage_backend_name=ASSET_STORAGE_CONFIG.backend,
+        storage_key=stored["storage_key"],
+        url=stored["url"],
+        mime_type=mime_type,
+        size_bytes=stored.get("size_bytes", 0),
+        provider_name=provider_result.provider_name,
+        provider_job_id=provider_result.provider_job_id,
+        created_at=now_iso(),
+    )
+    await db.assets.insert_one(asset_doc.copy())
+    return stored["url"]
+
+
 def _voice_text_for_scene(scene: dict) -> str:
     dialogue = (scene.get("dialogue") or "").strip()
     if dialogue:
@@ -2306,6 +2352,27 @@ def _voice_text_for_scene(scene: dict) -> str:
         (scene.get("enhanced_video_prompt") or scene.get("visual_prompt") or "").strip(),
     ]
     return ". ".join(part for part in parts if part).strip()
+
+
+def _music_prompt_for_scene(scene: dict) -> str:
+    mood = (scene.get("music_mood") or "Cinematic").strip()
+    title = (scene.get("title") or "Scene").strip()
+    visual = (scene.get("enhanced_video_prompt") or scene.get("visual_prompt") or "").strip()
+    location = (scene.get("location") or "").strip()
+    prompt = (
+        f"Instrumental {mood.lower()} background score for a short cinematic scene titled {title}. "
+        f"Location: {location or 'unspecified'}. Visual tone: {visual or 'dramatic and polished'}. "
+        "No vocals, no lyrics, suitable for dialogue underlay."
+    )
+    return prompt.strip()
+
+
+def _music_duration_seconds_for_scene(scene: dict) -> float:
+    try:
+        scene_duration = float(scene.get("duration") or 10)
+    except (TypeError, ValueError):
+        scene_duration = 10.0
+    return max(3.0, min(30.0, scene_duration))
 
 
 @api.post("/characters/{character_id}/generate-image")
@@ -2489,6 +2556,107 @@ async def generate_scene_voice(scene_id: str, user: dict = Depends(current_user)
     await log_generation("voice", scene["project_id"], cost, user_id=user["id"])
     return {
         "voice_audio_url": voice_audio_url,
+        "cost": cost,
+        "remaining_credits": remaining_credits,
+        "mode": guard.mode,
+        "provider_name": guard.provider_name,
+        "model_name": guard.model_name,
+    }
+
+
+@api.post("/scenes/{scene_id}/generate-music")
+async def generate_scene_music(scene_id: str, user: dict = Depends(current_user)):
+    scene = await _owned_scene(scene_id, user)
+    project = await _owned_project(scene["project_id"], user)
+    cost = COSTS["music"]
+    await _check_credits(user, cost, "music")
+    music_prompt = _music_prompt_for_scene(scene)
+    if not music_prompt:
+        raise HTTPException(400, "Music prompt is empty")
+
+    global_settings = await _load_provider_settings()
+    snap = provider_status(modality="music", project=project, global_settings=global_settings)
+    if snap.get("would_use_real_provider") and ASSET_STORAGE_CONFIG.backend != "local":
+        raise HTTPException(503, "Asset storage backend is not configured for real music generation")
+    guard = await execute_provider(
+        modality="music",
+        project=project,
+        global_settings=global_settings,
+        estimated_credits=cost,
+        project_id=scene["project_id"],
+        scene_id=scene_id,
+        prompt=music_prompt,
+        duration_seconds=_music_duration_seconds_for_scene(scene),
+        audio_kind="music",
+    )
+    log.info("provider.music mode=%s status=%s provider=%s/%s", guard.mode, guard.status, guard.provider_name, guard.model_name)
+    if guard.mode == "real":
+        if guard.status != STATUS_SUCCESS:
+            await log_generation(
+                "music",
+                scene["project_id"],
+                0,
+                status="failed",
+                error=guard.error or guard.message or "real music provider failed",
+                user_id=user["id"],
+            )
+            raise HTTPException(502, "Real music provider failed")
+        music_audio_url = await _store_generated_music_asset(
+            user=user,
+            project_id=scene["project_id"],
+            scene_id=scene_id,
+            provider_result=guard,
+        )
+    else:
+        if guard.status == "blocked":
+            await log_generation(
+                "music",
+                scene["project_id"],
+                0,
+                status="failed",
+                error=guard.message or "real music provider blocked",
+                user_id=user["id"],
+            )
+            raise HTTPException(503, guard.message or "Real music provider blocked")
+        music_audio_url = MOCK_MUSIC_AUDIO_URL
+        asset_id = new_id()
+        storage_key = make_storage_key(
+            user_id=user["id"],
+            project_id=scene["project_id"],
+            asset_type="music_audio",
+            asset_id=asset_id,
+            mime_type="audio/mpeg",
+            source_name=music_audio_url,
+        )
+        stored = storage_backend(ASSET_STORAGE_CONFIG).save_external_url(storage_key, music_audio_url)
+        asset_doc = asset_metadata(
+            asset_id=asset_id,
+            user_id=user["id"],
+            project_id=scene["project_id"],
+            scene_id=scene_id,
+            asset_type="music_audio",
+            storage_backend_name=ASSET_STORAGE_CONFIG.backend,
+            storage_key=stored["storage_key"],
+            url=stored["url"],
+            external_url=stored.get("external_url"),
+            mime_type="audio/mpeg",
+            size_bytes=stored.get("size_bytes", 0),
+            provider_name=guard.provider_name,
+            provider_job_id=guard.provider_job_id,
+            created_at=now_iso(),
+        )
+        await db.assets.insert_one(asset_doc.copy())
+
+    await db.scenes.update_one({"id": scene_id}, {"$set": {"music_audio_url": music_audio_url}})
+    remaining_credits = await _deduct_credits(
+        user,
+        cost,
+        "music",
+        project_id=scene["project_id"],
+    )
+    await log_generation("music", scene["project_id"], cost, user_id=user["id"])
+    return {
+        "music_audio_url": music_audio_url,
         "cost": cost,
         "remaining_credits": remaining_credits,
         "mode": guard.mode,

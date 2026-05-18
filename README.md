@@ -15,8 +15,10 @@ exists behind disabled-by-default guards for 5-second segments, server-side
 SSM secrets, credit checks, duration caps, provider activity logging, and
 asset storage. ElevenLabs voice support exists behind disabled-by-default
 guards, server-side SSM secrets, a backend-only voice id, credit checks,
-provider activity logging, and generated audio asset storage. Music and export
-providers remain mock-only.
+provider activity logging, and generated audio asset storage. ElevenLabs music
+and SFX support exists behind disabled-by-default guards, server-side SSM
+secrets, credit checks, provider activity logging, and generated audio asset
+storage. Export remains mock-only.
 
 ## MVP Plan
 
@@ -85,7 +87,15 @@ Controlled Luma staging/private-beta enablement steps are documented in
   /api/scenes/{scene_id}/generate-voice` stores successful audio as a
   `voice_audio` asset and deducts credits only after storage succeeds. No
   controlled real voice call has been run yet.
-- Music and export providers remain mock-only.
+- ElevenLabs music/SFX support exists through
+  `backend/providers/music_elevenlabs.py`, but real music generation remains
+  disabled until `USE_REAL_MUSIC_PROVIDER=true`, effective music provider is
+  `elevenlabs-music`, and a backend SSM secret exists at
+  `SSM_PROVIDER_KEY_PREFIX/music/elevenlabs/api-key`. `POST
+  /api/scenes/{scene_id}/generate-music` stores successful audio as a
+  `music_audio` asset and deducts credits only after storage succeeds. No
+  controlled real music/SFX call has been run yet.
+- Export providers remain mock-only.
 - A backend-only secrets resolver foundation exists. It defaults to disabled
   mode and can later resolve provider API keys from AWS SSM Parameter Store
   `SecureString` without exposing secret values to MongoDB or the frontend.
@@ -178,6 +188,9 @@ VIDEO_MAX_SEGMENTS_PER_SCENE=3
 VIDEO_MAX_PROJECT_SECONDS=60
 USE_REAL_VOICE_PROVIDER=false
 ELEVENLABS_DEFAULT_VOICE_ID=
+USE_REAL_MUSIC_PROVIDER=false
+MUSIC_REAL_PROVIDER=elevenlabs-music
+MUSIC_REAL_MODEL=music-v1
 ```
 
 `AUTH_JWT_SECRET` and `AUTH_TOKEN_EXPIRES_MINUTES` are accepted only as

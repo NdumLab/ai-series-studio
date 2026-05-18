@@ -1,4 +1,5 @@
-import { Mic2, Music2 } from "lucide-react";
+import { useState } from "react";
+import { Loader2, Mic2, Music2 } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -126,9 +127,28 @@ function CharacterVoiceList({ voiceResolution, characters, onCharacterEdit }) {
 }
 
 function VoiceMusicRow({ scene, index, options, reload }) {
+  const [busy, setBusy] = useState(null);
+  const [error, setError] = useState("");
   const update = async (k, v) => {
     await Scenes.update(scene.id, { [k]: v });
     reload();
+  };
+  const generateAudio = async (kind) => {
+    setBusy(kind);
+    setError("");
+    try {
+      if (kind === "voice") {
+        await Scenes.generateVoice(scene.id);
+      } else {
+        await Scenes.generateMusic(scene.id);
+      }
+      await reload();
+    } catch (err) {
+      const detail = err?.response?.data?.detail;
+      setError(typeof detail === "string" ? detail : detail?.message || "Audio generation failed");
+    } finally {
+      setBusy(null);
+    }
   };
   return (
     <div
@@ -160,6 +180,12 @@ function VoiceMusicRow({ scene, index, options, reload }) {
             ))}
           </SelectContent>
         </Select>
+        <AudioAction
+          kind="voice"
+          busy={busy}
+          url={scene.voice_audio_url}
+          onGenerate={generateAudio}
+        />
       </div>
       <div className="md:col-span-4">
         <label className="es-label block mb-1.5 inline-flex items-center gap-1">
@@ -180,7 +206,48 @@ function VoiceMusicRow({ scene, index, options, reload }) {
             ))}
           </SelectContent>
         </Select>
+        <AudioAction
+          kind="music"
+          busy={busy}
+          url={scene.music_audio_url}
+          onGenerate={generateAudio}
+        />
       </div>
+      {error && (
+        <div className="md:col-span-12 text-xs text-[#FF453A]" role="alert">
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AudioAction({ kind, busy, url, onGenerate }) {
+  const active = busy === kind;
+  const Icon = kind === "voice" ? Mic2 : Music2;
+  const label = url ? `Regenerate ${kind}` : `Generate ${kind}`;
+  return (
+    <div className="mt-2 flex items-center gap-2 min-h-9">
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        disabled={!!busy}
+        onClick={() => onGenerate(kind)}
+        className="h-8 border border-white/10 bg-white/[0.03] text-[#A1A1AA] hover:text-white hover:bg-white/10"
+        data-testid={`generate-${kind}`}
+      >
+        {active ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Icon className="w-3.5 h-3.5 mr-1.5" />}
+        {active ? "Generating" : label}
+      </Button>
+      {url && (
+        <audio
+          controls
+          src={url}
+          className="h-8 max-w-[180px]"
+          data-testid={`${kind}-preview`}
+        />
+      )}
     </div>
   );
 }

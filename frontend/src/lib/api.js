@@ -102,6 +102,8 @@ export const Scenes = {
   update: (id, payload) => api.put(`/scenes/${id}`, payload).then((r) => r.data),
   remove: (id) => api.delete(`/scenes/${id}`).then((r) => r.data),
   generateImage: (id) => api.post(`/scenes/${id}/generate-image`).then((r) => r.data),
+  generateVoice: (id) => api.post(`/scenes/${id}/generate-voice`).then((r) => r.data),
+  generateMusic: (id) => api.post(`/scenes/${id}/generate-music`).then((r) => r.data),
   generateSegment: (id) => api.post(`/scenes/${id}/segments`).then((r) => r.data),
   expand: (id) => api.post(`/scenes/${id}/expand`).then((r) => r.data),
   reduceToDraft: (id) => api.post(`/scenes/${id}/reduce-to-draft`).then((r) => r.data),

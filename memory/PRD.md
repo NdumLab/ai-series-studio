@@ -1,7 +1,7 @@
 # AI Episode Studio — PRD
 
 ## Problem Statement
-Build a full-stack web MVP called AI Episode Studio that helps creators generate complete 1–3 minute AI story videos from characters, scenes, voice, music and short video clips. The product remains mock-first by default for video/voice/music/export. Real LLM execution exists for story and prompt text operations, real OpenAI image generation exists behind disabled-by-default guards, Luma video generation exists behind disabled-by-default guards, and ElevenLabs voice generation exists behind disabled-by-default guards, server-side secrets, credit checks, provider activity logging, and asset storage.
+Build a full-stack web MVP called AI Episode Studio that helps creators generate complete 1–3 minute AI story videos from characters, scenes, voice, music and short video clips. The product remains mock-first by default for video/voice/music/export. Real LLM execution exists for story and prompt text operations, real OpenAI image generation exists behind disabled-by-default guards, Luma video generation exists behind disabled-by-default guards, ElevenLabs voice generation exists behind disabled-by-default guards, and ElevenLabs music/SFX generation exists behind disabled-by-default guards, server-side secrets, credit checks, provider activity logging, and asset storage.
 
 ## Architecture
 - Backend: FastAPI + MongoDB (relational-style schemas), all routes under `/api`
@@ -14,8 +14,9 @@ Build a full-stack web MVP called AI Episode Studio that helps creators generate
   behind `USE_REAL_LLM_PROVIDER`, OpenAI image is real-capable behind
   `USE_REAL_IMAGE_PROVIDER`, Luma video is real-capable behind
   `USE_REAL_VIDEO_PROVIDER`, and ElevenLabs voice is real-capable behind
-  `USE_REAL_VOICE_PROVIDER`. Video and voice remain mock by default, and
-  music/export remain mock-only at runtime.
+  `USE_REAL_VOICE_PROVIDER`. ElevenLabs music/SFX is real-capable behind
+  `USE_REAL_MUSIC_PROVIDER`. Video, voice, and music remain mock by default,
+  and export remains mock-only at runtime.
 - Mock generators return curated static URLs (Unsplash + Google sample mp4s) and log every generation/provider activity.
 
 ## Data Models (MongoDB collections)
@@ -55,7 +56,9 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
   ElevenLabs voice support exists but is disabled by default and guarded by
   feature flag, effective provider, server-side SSM secret,
   `ELEVENLABS_DEFAULT_VOICE_ID`, credits, storage, and provider activity
-  logging. Music/export remain mock-only.
+  logging. ElevenLabs music/SFX support exists but is disabled by default and
+  guarded by feature flag, effective provider, server-side SSM secret, credits,
+  storage, and provider activity logging. Export remains mock-only.
 - Real image provider planning and guard details are documented in
   `docs/IMAGE_PROVIDER_PLAN.md`.
 - Backend-only provider secrets resolver exists with disabled mode and AWS SSM
@@ -86,7 +89,8 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
   available for text operations; real OpenAI image is implemented but disabled
   by default; Luma video is implemented but disabled by default after
   controlled validation; ElevenLabs voice is implemented but disabled by
-  default. Music/export remain mock-only.
+  default; ElevenLabs music/SFX is implemented but disabled by default. Export
+  remains mock-only.
 - 100% MVP still requires real image staging/private-beta enablement, real
   video segments, real voice/music or upload fallback, real FFmpeg export,
   production object storage configuration, deployment, and end-to-end real
@@ -107,7 +111,6 @@ rewrite 3 · split_scenes 4 · image 2 · video_segment 12 · voice 1 · music 2
 - Production Stripe hardening / live billing decision.
 - Real Image provider rollout / private-beta enablement.
 - Real Video private-beta rollout.
-- Real Music provider.
 - Real Export / FFmpeg worker.
 - Production S3/R2 storage configuration.
 - Public sharing.
@@ -136,6 +139,26 @@ provider activity logging.
   voice attempts do not deduct credits or create assets.
 - No paid real voice call, frontend API key input, music provider, export
   worker, Stripe change, real image change, or real video change was added.
+
+## Iteration 46 (2026-05) — ElevenLabs music/SFX provider behind guards
+- Added `backend/providers/music_elevenlabs.py` for ElevenLabs Music and Sound
+  Effects generation.
+- Real scene music generation is available through
+  `POST /api/scenes/{scene_id}/generate-music`, but only when
+  `USE_REAL_MUSIC_PROVIDER=true`, the effective music provider is
+  `elevenlabs-music`, and a server-side SSM secret exists at
+  `/ai-series-studio/providers/music/elevenlabs/api-key`.
+- Successful real music bytes are saved through asset storage as
+  `music_audio`, scene `music_audio_url` is updated, and credits are deducted
+  only after storage succeeds.
+- The provider class also supports ElevenLabs Sound Effects through
+  `/v1/sound-generation` for future SFX-specific calls.
+- Voice/Music tab now exposes guarded Generate/Regenerate controls and audio
+  previews for scene voice and music assets.
+- Provider activity remains allowlisted safe metadata only; prompts, audio
+  bytes, and API keys are not stored in activity rows.
+- No paid real music/SFX call, frontend API key input, export worker, Stripe
+  change, real image change, or real video change was added.
 
 ## Iteration 33 (2026-05) — Real OpenAI image provider behind guards
 - Added `backend/providers/image_openai.py` for OpenAI GPT Image generation.

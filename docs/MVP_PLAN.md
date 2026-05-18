@@ -61,7 +61,12 @@ Completed today:
   backend-only SSM secret resolution, `ELEVENLABS_DEFAULT_VOICE_ID`, credit
   checks, provider activity logging, and generated `voice_audio` asset storage.
   It is disabled by default and has not had a controlled paid real voice call.
-- Mock remaining non-LLM providers: Music and Export remain mock-only.
+- Real music/SFX provider: ElevenLabs Music and Sound Effects support exists
+  behind `USE_REAL_MUSIC_PROVIDER=true`, effective provider
+  `elevenlabs-music`, backend-only SSM secret resolution, credit checks,
+  provider activity logging, and generated `music_audio` asset storage. It is
+  disabled by default and has not had a controlled paid real music/SFX call.
+- Mock remaining non-LLM providers: Export remains mock-only.
 - Cost tracking: operation costs, project/scene estimates, wallet ring,
   high-cost scene warnings, trend deltas, reduce-to-draft, per-user credit
   balances, `GET /api/credits/status`, credit event logging, and
@@ -127,12 +132,12 @@ Completed:
 - [x] Luma video staging/private-beta runbook.
 - [x] Controlled real Luma initial segment and Expand Next 5 Seconds validation.
 - [x] Real ElevenLabs voice provider behind disabled-by-default guards.
+- [x] Real ElevenLabs music/SFX provider behind disabled-by-default guards.
 
 Remaining:
 
 - [x] Production auth/user ownership hardening before paid billing.
 - [ ] Real image staging rollout and private-beta enablement.
-- [ ] Real music/SFX provider.
 - [ ] Real FFmpeg export worker.
 - [ ] S3/R2 storage.
 - [ ] Production Stripe hardening and live billing decision.
@@ -224,8 +229,9 @@ decision and are not enabled.
 ### Phase 6: Real voice/music
 
 - Completed: add ElevenLabs voice provider behind disabled-by-default guards.
-- Add music/SFX provider.
+- Completed: add ElevenLabs music/SFX provider behind disabled-by-default guards.
 - Run one controlled real voice call later after explicit approval.
+- Run one controlled real music/SFX call later after explicit approval.
 - Keep optional upload fallback.
 
 ### Phase 7: Real export
